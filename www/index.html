@@ -9,6 +9,11 @@
         font-size: 16px;
     }
 
+    #puzzle_entry {
+        font-family: "Consolas";
+        font-size: 16px;
+    }
+
     td {
         text-align: center;
         width: 2em;
@@ -17,6 +22,7 @@
 
     .normal_cell {
         border: 1px solid black;
+        cursor: pointer;
     }
 
     .blackened {
@@ -39,6 +45,13 @@
     </style>
   </head>
   <body>
+    <form id="generate_form" action="#">
+    Rows: <input type="text" id="rows_entry" value="2" />
+    Columns: <input type="text" id="columns_entry" value="5" />
+    Puzzle: <input type="text" id="puzzle_entry" value="LO_K L_OK " />
+    <input type="submit" id="generate_puzzle" value="Generate!" />
+    </form>
+    <hr />
     <div id="board_display"><table style="display: none"></table></div>
     <hr />
     <button id="check_solution">Check!</button>

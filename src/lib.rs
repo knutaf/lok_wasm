@@ -102,6 +102,8 @@ pub struct Board {
 #[wasm_bindgen]
 impl Board {
     pub fn new(rows: usize, cols: usize, contents: &str) -> Board {
+        log!("puzzle: {}", contents);
+
         let mut board = Board {
             grid: Grid::new(cols, rows, &BoardCell::blank()),
             moves: vec![],

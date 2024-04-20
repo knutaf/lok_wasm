@@ -2,9 +2,14 @@ import { memory } from "lok-wasm/lok_wasm_bg";
 import { Board, BoardCell } from "lok-wasm";
 
 document.getElementById("check_solution").addEventListener("click", onClickCheckSolution);
+document.getElementById("generate_form").addEventListener("submit", onGenerateSubmit);
 
-const g_board = Board.new(3, 4, "LOK ____LOK ");
-renderBoard(g_board);
+var g_board = null;
+
+function onGenerateSubmit(evt) {
+    g_board = Board.new(parseInt(document.getElementById("rows_entry").value), parseInt(document.getElementById("columns_entry").value), document.getElementById("puzzle_entry").value);
+    renderBoard(g_board);
+}
 
 function onCellClick(evt) {
     const cell = evt.target;
@@ -53,3 +58,5 @@ function renderBoard(board) {
 
     boardDisplay.replaceChild(boardTable, boardDisplay.firstChild);
 }
+
+document.getElementById("generate_form").requestSubmit();
