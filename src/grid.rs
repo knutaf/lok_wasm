@@ -1,6 +1,4 @@
-use std::{
-    ops::{Deref, DerefMut, Index, IndexMut},
-};
+use std::ops::{Deref, DerefMut, Index, IndexMut};
 
 /// A simple grid of user-defined objects.
 ///
@@ -8,7 +6,9 @@ use std::{
 /// it via regular (mutable) slice methods. In addition, you can index
 /// into it by `(row, column)` pairs.
 pub struct Grid<CellType>
-    where CellType : Clone {
+where
+    CellType: Clone,
+{
     width: usize,
     height: usize,
     cells: Vec<CellType>,
@@ -24,7 +24,9 @@ pub struct RC(pub usize, pub usize);
 pub struct XY(pub usize, pub usize);
 
 impl<CellType> Grid<CellType>
-    where CellType : Clone {
+where
+    CellType: Clone,
+{
     /// The width of the grid in cells.
     pub fn width(&self) -> usize {
         self.width
@@ -55,7 +57,9 @@ impl<CellType> Grid<CellType>
 }
 
 impl<CellType> Index<RC> for Grid<CellType>
-    where CellType : Clone {
+where
+    CellType: Clone,
+{
     type Output = CellType;
     fn index(&self, RC(row, col): RC) -> &Self::Output {
         &self.cells[(row * self.width + col) as usize]
@@ -63,14 +67,18 @@ impl<CellType> Index<RC> for Grid<CellType>
 }
 
 impl<CellType> IndexMut<RC> for Grid<CellType>
-    where CellType : Clone {
+where
+    CellType: Clone,
+{
     fn index_mut(&mut self, RC(row, col): RC) -> &mut Self::Output {
         &mut self.cells[(row * self.width + col) as usize]
     }
 }
 
 impl<CellType> Index<&XY> for Grid<CellType>
-    where CellType : Clone {
+where
+    CellType: Clone,
+{
     type Output = CellType;
     fn index(&self, XY(x, y): &XY) -> &Self::Output {
         &self.cells[(*y * self.width + *x) as usize]
@@ -78,7 +86,9 @@ impl<CellType> Index<&XY> for Grid<CellType>
 }
 
 impl<CellType> Index<XY> for Grid<CellType>
-    where CellType : Clone {
+where
+    CellType: Clone,
+{
     type Output = CellType;
     fn index(&self, xy: XY) -> &Self::Output {
         self.index(&xy)
@@ -86,21 +96,27 @@ impl<CellType> Index<XY> for Grid<CellType>
 }
 
 impl<CellType> IndexMut<&XY> for Grid<CellType>
-    where CellType : Clone {
+where
+    CellType: Clone,
+{
     fn index_mut(&mut self, XY(x, y): &XY) -> &mut Self::Output {
         &mut self.cells[(*y * self.width + *x) as usize]
     }
 }
 
 impl<CellType> IndexMut<XY> for Grid<CellType>
-    where CellType : Clone {
+where
+    CellType: Clone,
+{
     fn index_mut(&mut self, xy: XY) -> &mut Self::Output {
         self.index_mut(&xy)
     }
 }
 
 impl<CellType> Deref for Grid<CellType>
-    where CellType : Clone {
+where
+    CellType: Clone,
+{
     type Target = [CellType];
     fn deref(&self) -> &Self::Target {
         &self.cells
@@ -108,7 +124,9 @@ impl<CellType> Deref for Grid<CellType>
 }
 
 impl<CellType> DerefMut for Grid<CellType>
-    where CellType : Clone {
+where
+    CellType: Clone,
+{
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.cells
     }

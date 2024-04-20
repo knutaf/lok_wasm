@@ -1,9 +1,9 @@
 extern crate web_sys;
 
-mod utils;
 mod grid;
+mod utils;
 
-use crate::grid::Grid;
+use crate::grid::{Grid, RC};
 
 // A macro to provide `println!(..)`-style syntax for `console.log` logging.
 macro_rules! log {
@@ -20,9 +20,15 @@ pub struct Board {
 #[wasm_bindgen]
 impl Board {
     pub fn new() -> Board {
-        Board {
-            grid: Grid::new(6, 4, &('!' as u8)),
-        }
+        let mut board = Board {
+            grid: Grid::new(4, 1, &(' ' as u8)),
+        };
+
+        board.grid[RC(0, 0)] = 'L' as u8;
+        board.grid[RC(0, 1)] = 'O' as u8;
+        board.grid[RC(0, 2)] = 'K' as u8;
+
+        board
     }
 
     pub fn width(&self) -> u32 {
