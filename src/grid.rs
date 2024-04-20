@@ -17,6 +17,7 @@ where
 
 /// A row/column pair for indexing into the grid.
 /// Distinct from an x/y pair.
+#[derive(PartialEq, Clone, Debug)]
 pub struct RC(pub usize, pub usize);
 
 /// An x/y pair for indexing into the grid.
@@ -52,26 +53,30 @@ where
         }
     }
 
-    pub fn cells(&self) -> *const CellType {
-        self.cells.as_ptr()
+    pub fn cells(&self) -> &Vec<CellType> {
+        &self.cells
+    }
+
+    pub fn cells_mut(&mut self) -> &mut Vec<CellType> {
+        &mut self.cells
     }
 }
 
-impl<CellType> Index<RC> for Grid<CellType>
+impl<CellType> Index<&RC> for Grid<CellType>
 where
     CellType: Clone,
 {
     type Output = CellType;
-    fn index(&self, RC(row, col): RC) -> &Self::Output {
+    fn index(&self, RC(row, col): &RC) -> &Self::Output {
         &self.cells[(row * self.width + col) as usize]
     }
 }
 
-impl<CellType> IndexMut<RC> for Grid<CellType>
+impl<CellType> IndexMut<&RC> for Grid<CellType>
 where
     CellType: Clone,
 {
-    fn index_mut(&mut self, RC(row, col): RC) -> &mut Self::Output {
+    fn index_mut(&mut self, RC(row, col): &RC) -> &mut Self::Output {
         &mut self.cells[(row * self.width + col) as usize]
     }
 }
@@ -86,31 +91,12 @@ where
     }
 }
 
-impl<CellType> Index<XY> for Grid<CellType>
-where
-    CellType: Clone,
-{
-    type Output = CellType;
-    fn index(&self, xy: XY) -> &Self::Output {
-        self.index(&xy)
-    }
-}
-
 impl<CellType> IndexMut<&XY> for Grid<CellType>
 where
     CellType: Clone,
 {
     fn index_mut(&mut self, XY(x, y): &XY) -> &mut Self::Output {
         &mut self.cells[(*y * self.width + *x) as usize]
-    }
-}
-
-impl<CellType> IndexMut<XY> for Grid<CellType>
-where
-    CellType: Clone,
-{
-    fn index_mut(&mut self, xy: XY) -> &mut Self::Output {
-        self.index_mut(&xy)
     }
 }
 

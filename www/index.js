@@ -1,7 +1,7 @@
 import { memory } from "lok-wasm/lok_wasm_bg";
 import { Board } from "lok-wasm";
 
-const board = Board.new(1, 4);
+const board = Board.new(1, 4, "LOK ");
 renderBoard(board);
 
 function renderBoard(board) {
