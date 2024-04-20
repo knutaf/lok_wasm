@@ -210,13 +210,10 @@ impl Board {
             }
         }
 
-        for r in 0..simgrid.height() {
-            for c in 0..simgrid.width() {
-                let rc = RC(r, c);
-                if !simgrid[&rc].is_done() {
-                    log!("{:?} not done", rc);
-                    return Some(self.moves.len());
-                }
+        for (rc, cell) in simgrid.enumerate_row_col() {
+            if !cell.is_done() {
+                log!("{:?} not done", rc);
+                return Some(self.moves.len());
             }
         }
 

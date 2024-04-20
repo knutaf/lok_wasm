@@ -1,5 +1,15 @@
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 
+/// A row/column pair for indexing into the grid.
+/// Distinct from an x/y pair.
+#[derive(PartialEq, Clone, Debug)]
+pub struct RC(pub usize, pub usize);
+
+/// An x/y pair for indexing into the grid.
+/// Distinct from a row/column pair.
+#[derive(PartialEq, Clone, Debug)]
+pub struct XY(pub usize, pub usize);
+
 /// A simple grid of user-defined objects.
 ///
 /// It dereferences to a slice of [`CellType`], so you can directly manipulate
@@ -14,16 +24,6 @@ where
     height: usize,
     cells: Vec<CellType>,
 }
-
-/// A row/column pair for indexing into the grid.
-/// Distinct from an x/y pair.
-#[derive(PartialEq, Clone, Debug)]
-pub struct RC(pub usize, pub usize);
-
-/// An x/y pair for indexing into the grid.
-/// Distinct from a row/column pair.
-#[derive(PartialEq, Clone, Debug)]
-pub struct XY(pub usize, pub usize);
 
 impl<CellType> Grid<CellType>
 where
@@ -59,6 +59,10 @@ where
 
     pub fn cells_mut(&mut self) -> &mut Vec<CellType> {
         &mut self.cells
+    }
+
+    pub fn enumerate_row_col(&self) -> GridRowColumnEnumerator<CellType> {
+        GridRowColumnEnumerator::new(&self)
     }
 }
 
@@ -116,5 +120,52 @@ where
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.cells
+    }
+}
+
+/// An enumerator that iterates low to high row number and low to high column number. Basically reading order.
+pub struct GridRowColumnEnumerator<'g, CellType>
+where
+    CellType: Clone,
+{
+    grid: &'g Grid<CellType>,
+    row: usize,
+    col: usize,
+}
+
+impl<'g, CellType> GridRowColumnEnumerator<'g, CellType>
+where
+    CellType: Clone,
+{
+    fn new(grid: &'g Grid<CellType>) -> Self {
+        Self {
+            grid,
+            row: 0,
+            col: 0,
+        }
+    }
+}
+
+impl<'g, CellType> Iterator for GridRowColumnEnumerator<'g, CellType>
+where
+    CellType: Clone,
+{
+    type Item = (RC, &'g CellType);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.row >= self.grid.height() {
+            return None;
+        }
+
+        if self.col >= self.grid.width() {
+            self.col = 0;
+            self.row += 1;
+            return self.next();
+        }
+
+        let ret = Some((RC(self.row, self.col), &self.grid[&RC(self.row, self.col)]));
+        self.col += 1;
+
+        ret
     }
 }
