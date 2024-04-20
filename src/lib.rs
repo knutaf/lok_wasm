@@ -136,17 +136,17 @@ impl Board {
                                 match letter {
                                     'L' => {
                                         state = BoardState::L(target_rc.clone());
-                                    },
+                                    }
                                     _ => {
                                         log!("Letter {} not valid", letter);
                                         return false;
-                                    },
+                                    }
                                 }
                             } else {
                                 log!("Not a letter: {}", target.get_raw());
                                 return false;
                             }
-                        },
+                        }
                         BoardState::L(rc_l) => {
                             if !self.is_connected_for_keyword(&rc_l, target_rc) {
                                 log!("{:?} not connected to {:?} for keyword", rc_l, target_rc);
@@ -157,17 +157,17 @@ impl Board {
                                 match letter {
                                     'O' => {
                                         state = BoardState::LO(rc_l.clone(), target_rc.clone());
-                                    },
+                                    }
                                     _ => {
                                         log!("Letter {} not valid. Expected O", letter);
                                         return false;
-                                    },
+                                    }
                                 }
                             } else {
                                 log!("Not a letter: {}", target.get_raw());
                                 return false;
                             }
-                        },
+                        }
                         BoardState::LO(rc_l, rc_o) => {
                             if !self.is_connected_for_keyword(&rc_o, target_rc) {
                                 log!("{:?} not connected to {:?} for keyword", rc_o, target_rc);
@@ -177,21 +177,25 @@ impl Board {
                             if let Some(letter) = target.get_letter() {
                                 match letter {
                                     'K' => {
-                                        state = BoardState::LOK(rc_l.clone(), rc_o.clone(), target_rc.clone());
+                                        state = BoardState::LOK(
+                                            rc_l.clone(),
+                                            rc_o.clone(),
+                                            target_rc.clone(),
+                                        );
                                         simgrid[&rc_l] = BoardCell::blackened();
                                         simgrid[&rc_o] = BoardCell::blackened();
                                         simgrid[target_rc] = BoardCell::blackened();
-                                    },
+                                    }
                                     _ => {
                                         log!("Letter {} not valid. Expected K", letter);
                                         return false;
-                                    },
+                                    }
                                 }
                             } else {
                                 log!("Not a letter: {}", target.get_raw());
                                 return false;
                             }
-                        },
+                        }
                         BoardState::LOK(rc_l, rc_o, rc_k) => {
                             if target.is_blackened() {
                                 log!("{:?} already blackened", target_rc);
@@ -200,9 +204,9 @@ impl Board {
 
                             simgrid[target_rc] = BoardCell::blackened();
                             state = BoardState::Idle;
-                        },
+                        }
                     }
-                },
+                }
             }
         }
 
