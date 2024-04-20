@@ -121,11 +121,11 @@ impl Board {
         true
     }
 
-    pub fn commit_and_check_solution(&self) -> bool {
+    pub fn commit_and_check_solution(&self) -> Option<usize> {
         let mut simgrid = self.grid.clone();
         let mut state = BoardState::Idle;
-        for mv in self.moves.iter() {
-            log!("state {:?}, move {:?}", state, mv);
+        for (mv_num, mv) in self.moves.iter().enumerate() {
+            log!("{:2}: state {:?}, move {:?}", mv_num, state, mv);
 
             match mv {
                 Move::Blacken(target_rc) => {
@@ -139,18 +139,18 @@ impl Board {
                                     }
                                     _ => {
                                         log!("Letter {} not valid", letter);
-                                        return false;
+                                        return Some(mv_num);
                                     }
                                 }
                             } else {
                                 log!("Not a letter: {}", target.get_raw());
-                                return false;
+                                return Some(mv_num);
                             }
                         }
                         BoardState::L(rc_l) => {
                             if !self.is_connected_for_keyword(&rc_l, target_rc) {
                                 log!("{:?} not connected to {:?} for keyword", rc_l, target_rc);
-                                return false;
+                                return Some(mv_num);
                             }
 
                             if let Some(letter) = target.get_letter() {
@@ -160,18 +160,18 @@ impl Board {
                                     }
                                     _ => {
                                         log!("Letter {} not valid. Expected O", letter);
-                                        return false;
+                                        return Some(mv_num);
                                     }
                                 }
                             } else {
                                 log!("Not a letter: {}", target.get_raw());
-                                return false;
+                                return Some(mv_num);
                             }
                         }
                         BoardState::LO(rc_l, rc_o) => {
                             if !self.is_connected_for_keyword(&rc_o, target_rc) {
                                 log!("{:?} not connected to {:?} for keyword", rc_o, target_rc);
-                                return false;
+                                return Some(mv_num);
                             }
 
                             if let Some(letter) = target.get_letter() {
@@ -188,18 +188,18 @@ impl Board {
                                     }
                                     _ => {
                                         log!("Letter {} not valid. Expected K", letter);
-                                        return false;
+                                        return Some(mv_num);
                                     }
                                 }
                             } else {
                                 log!("Not a letter: {}", target.get_raw());
-                                return false;
+                                return Some(mv_num);
                             }
                         }
                         BoardState::LOK(rc_l, rc_o, rc_k) => {
                             if target.is_blackened() {
                                 log!("{:?} already blackened", target_rc);
-                                return false;
+                                return Some(mv_num);
                             }
 
                             simgrid[target_rc] = BoardCell::blackened();
@@ -215,12 +215,12 @@ impl Board {
                 let rc = RC(r, c);
                 if !simgrid[&rc].is_done() {
                     log!("{:?} not done", rc);
-                    return false;
+                    return Some(self.moves.len());
                 }
             }
         }
 
-        true
+        None
     }
 }
 
@@ -235,16 +235,36 @@ mod tests {
         board.blacken(0, 1);
         board.blacken(0, 2);
         board.blacken(0, 3);
-        assert!(board.commit_and_check_solution());
+        assert!(board.commit_and_check_solution().is_none());
     }
 
     #[test]
-    fn lok4_correct_backwards() {
+    fn lok5_unsolvable() {
+        let mut board = Board::new(1, 5, "LOK  ");
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        assert!(board.commit_and_check_solution() == Some(4));
+    }
+
+    #[test]
+    fn lok4_out_of_order_middle() {
+        let mut board = Board::new(1, 4, "LOK ");
+        board.blacken(0, 0);
+        board.blacken(0, 2);
+        board.blacken(0, 1);
+        board.blacken(0, 3);
+        assert!(board.commit_and_check_solution() == Some(1));
+    }
+
+    #[test]
+    fn lok4_out_of_order_backwards() {
         let mut board = Board::new(1, 4, "LOK ");
         board.blacken(0, 2);
         board.blacken(0, 1);
         board.blacken(0, 0);
         board.blacken(0, 3);
-        assert!(board.commit_and_check_solution());
+        assert!(board.commit_and_check_solution() == Some(0));
     }
 }
