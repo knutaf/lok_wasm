@@ -91,6 +91,11 @@ enum BoardState {
     L(RC),
     LO(RC, RC),
     LOK(RC, RC, RC),
+    T(RC),
+    TL(RC, RC),
+    TLA(RC, RC, RC),
+    TLAK(RC, RC, RC, RC),
+    TLAK1(RC, RC, RC, RC, RC),
 }
 
 #[wasm_bindgen]
@@ -174,6 +179,9 @@ impl Board {
                                     'L' => {
                                         state = BoardState::L(target_rc.clone());
                                     }
+                                    'T' => {
+                                        state = BoardState::T(target_rc.clone());
+                                    }
                                     _ => {
                                         log!("Letter {} not valid", letter);
                                         return Some(mv_num);
@@ -236,6 +244,115 @@ impl Board {
                         BoardState::LOK(rc_l, rc_o, rc_k) => {
                             if target.is_blackened() {
                                 log!("{:?} already blackened", target_rc);
+                                return Some(mv_num);
+                            }
+
+                            simgrid[target_rc] = BoardCell::blackened();
+                            state = BoardState::Idle;
+                        }
+                        BoardState::T(rc_t) => {
+                            if !Board::is_connected_for_keyword(&simgrid, &rc_t, target_rc) {
+                                log!("{:?} not connected to {:?} for keyword", rc_t, target_rc);
+                                return Some(mv_num);
+                            }
+
+                            if let Some(letter) = target.get_letter() {
+                                match letter {
+                                    'L' => {
+                                        state = BoardState::TL(rc_t.clone(), target_rc.clone());
+                                    }
+                                    _ => {
+                                        log!("Letter {} not valid. Expected L", letter);
+                                        return Some(mv_num);
+                                    }
+                                }
+                            } else {
+                                log!("Not a letter: {}", target.get_raw());
+                                return Some(mv_num);
+                            }
+                        }
+                        BoardState::TL(rc_t, rc_l) => {
+                            if !Board::is_connected_for_keyword(&simgrid, &rc_l, target_rc) {
+                                log!("{:?} not connected to {:?} for keyword", rc_l, target_rc);
+                                return Some(mv_num);
+                            }
+
+                            if let Some(letter) = target.get_letter() {
+                                match letter {
+                                    'A' => {
+                                        state = BoardState::TLA(
+                                            rc_t.clone(),
+                                            rc_l.clone(),
+                                            target_rc.clone(),
+                                        );
+                                    }
+                                    _ => {
+                                        log!("Letter {} not valid. Expected A", letter);
+                                        return Some(mv_num);
+                                    }
+                                }
+                            } else {
+                                log!("Not a letter: {}", target.get_raw());
+                                return Some(mv_num);
+                            }
+                        }
+                        BoardState::TLA(rc_t, rc_l, rc_a) => {
+                            if !Board::is_connected_for_keyword(&simgrid, &rc_a, target_rc) {
+                                log!("{:?} not connected to {:?} for keyword", rc_a, target_rc);
+                                return Some(mv_num);
+                            }
+
+                            if let Some(letter) = target.get_letter() {
+                                match letter {
+                                    'K' => {
+                                        state = BoardState::TLAK(
+                                            rc_t.clone(),
+                                            rc_l.clone(),
+                                            rc_a.clone(),
+                                            target_rc.clone(),
+                                        );
+                                        simgrid[&rc_t] = BoardCell::blackened();
+                                        simgrid[&rc_l] = BoardCell::blackened();
+                                        simgrid[&rc_a] = BoardCell::blackened();
+                                        simgrid[target_rc] = BoardCell::blackened();
+                                    }
+                                    _ => {
+                                        log!("Letter {} not valid. Expected K", letter);
+                                        return Some(mv_num);
+                                    }
+                                }
+                            } else {
+                                log!("Not a letter: {}", target.get_raw());
+                                return Some(mv_num);
+                            }
+                        }
+                        BoardState::TLAK(rc_t, rc_l, rc_a, rc_k) => {
+                            if target.is_blackened() {
+                                log!("{:?} already blackened", target_rc);
+                                return Some(mv_num);
+                            }
+
+                            simgrid[target_rc] = BoardCell::blackened();
+                            state = BoardState::TLAK1(
+                                rc_t.clone(),
+                                rc_l.clone(),
+                                rc_a.clone(),
+                                rc_k.clone(),
+                                target_rc.clone(),
+                            );
+                        }
+                        BoardState::TLAK1(rc_t, rc_l, rc_a, rc_k, rc_black1) => {
+                            if target.is_blackened() {
+                                log!("{:?} already blackened", target_rc);
+                                return Some(mv_num);
+                            }
+
+                            if !Board::is_adjacent(&simgrid, &rc_black1, target_rc) {
+                                log!(
+                                    "{:?} not adjacent to {:?} for TLAK blacken",
+                                    rc_black1,
+                                    target_rc
+                                );
                                 return Some(mv_num);
                             }
 
@@ -305,6 +422,12 @@ impl Board {
             }
         }
 
+        true
+    }
+
+    fn is_adjacent(grid: &BoardGrid, rc1: &RC, rc2: &RC) -> bool {
+        assert_ne!(rc1, rc2);
+        // TODO implement
         true
     }
 }
@@ -401,5 +524,29 @@ mod tests {
         board.blacken(0, 2);
         board.blacken(0, 3);
         assert_eq!(board.commit_and_check_solution(), Some(1));
+    }
+
+    #[test]
+    fn tlak_correct() {
+        let mut board = Board::new("TLAK  ").unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        board.blacken(0, 4);
+        board.blacken(0, 5);
+        assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    fn tlak_wrong_k() {
+        let mut board = Board::new("TLAZ  ").unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        board.blacken(0, 4);
+        board.blacken(0, 5);
+        assert_eq!(board.commit_and_check_solution(), Some(3));
     }
 }
