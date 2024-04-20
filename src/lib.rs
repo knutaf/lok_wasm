@@ -50,6 +50,10 @@ impl BoardCell {
         *self == BoardCell::gap() || self.is_blackened()
     }
 
+    fn is_traversible(&self) -> bool {
+        self.is_done()
+    }
+
     fn get_letter(&self) -> Option<char> {
         match self.get_raw() {
             ' ' | '*' => None,
@@ -116,8 +120,52 @@ impl Board {
         self.moves.push(Move::Blacken(RC(row, col)));
     }
 
-    fn is_connected_for_keyword(&self, rc1: &RC, rc2: &RC) -> bool {
-        // TODO implement
+    fn is_connected_for_keyword(grid: &BoardGrid, rc1: &RC, rc2: &RC) -> bool {
+        assert_ne!(rc1, rc2);
+
+        // Must be either vertically or horizontally aligned
+        if rc1.0 != rc2.0 && rc1.1 != rc2.1 {
+            return false;
+        }
+
+        let row_walk_inc: isize = rc2.0.cmp(&rc1.0) as i8 as isize;
+        let col_walk_inc: isize = rc2.1.cmp(&rc1.1) as i8 as isize;
+        assert!(row_walk_inc == 0 || col_walk_inc == 0);
+
+        log!(
+            "Walk from {:?} to {:?}, using ({}, {})",
+            rc1,
+            rc2,
+            row_walk_inc,
+            col_walk_inc
+        );
+
+        let mut current_rc = rc1.clone();
+        loop {
+            assert!(row_walk_inc >= 0 || current_rc.0 > 0);
+            assert!(col_walk_inc >= 0 || current_rc.1 > 0);
+            current_rc = RC(
+                current_rc.0.checked_add_signed(row_walk_inc).unwrap(),
+                current_rc.1.checked_add_signed(col_walk_inc).unwrap(),
+            );
+
+            assert!(current_rc.0 < grid.height());
+            assert!(current_rc.1 < grid.width());
+
+            if current_rc == *rc2 {
+                return true;
+            }
+
+            let current = grid[&current_rc];
+            if !current.is_traversible() {
+                log!(
+                    "Not connected: {:?} is not available for traversal",
+                    current_rc
+                );
+                return false;
+            }
+        }
+
         true
     }
 
@@ -148,7 +196,7 @@ impl Board {
                             }
                         }
                         BoardState::L(rc_l) => {
-                            if !self.is_connected_for_keyword(&rc_l, target_rc) {
+                            if !Board::is_connected_for_keyword(&simgrid, &rc_l, target_rc) {
                                 log!("{:?} not connected to {:?} for keyword", rc_l, target_rc);
                                 return Some(mv_num);
                             }
@@ -169,7 +217,7 @@ impl Board {
                             }
                         }
                         BoardState::LO(rc_l, rc_o) => {
-                            if !self.is_connected_for_keyword(&rc_o, target_rc) {
+                            if !Board::is_connected_for_keyword(&simgrid, &rc_o, target_rc) {
                                 log!("{:?} not connected to {:?} for keyword", rc_o, target_rc);
                                 return Some(mv_num);
                             }
