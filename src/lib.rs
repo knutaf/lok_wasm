@@ -274,17 +274,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lok4_correct() {
+    fn lok1x4_correct() {
         let mut board = Board::new(1, 4, "LOK ");
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(0, 2);
         board.blacken(0, 3);
-        assert!(board.commit_and_check_solution().is_none());
+        assert_eq!(board.commit_and_check_solution(), None);
     }
 
     #[test]
-    fn lok5_unsolvable_extra_space() {
+    fn lok1x4_jump_gap() {
+        let mut board = Board::new(1, 6, "LO_K_ ");
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 3);
+        board.blacken(0, 5);
+        assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    fn lok1x5_unsolvable_extra_space() {
         let mut board = Board::new(1, 5, "LOK  ");
         board.blacken(0, 0);
         board.blacken(0, 1);
@@ -294,7 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn lok5_unsolvable_out_of_order() {
+    fn lok1x5_unsolvable_out_of_order() {
         let mut board = Board::new(1, 4, "LKO ");
         board.blacken(0, 0);
         board.blacken(0, 2);
@@ -304,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    fn lok4_out_of_order_middle() {
+    fn lok1x4_out_of_order_middle() {
         let mut board = Board::new(1, 4, "LOK ");
         board.blacken(0, 0);
         board.blacken(0, 2);
@@ -314,12 +324,42 @@ mod tests {
     }
 
     #[test]
-    fn lok4_out_of_order_backwards() {
+    fn lok1x4_out_of_order_backwards() {
         let mut board = Board::new(1, 4, "LOK ");
         board.blacken(0, 2);
         board.blacken(0, 1);
         board.blacken(0, 0);
         board.blacken(0, 3);
         assert_eq!(board.commit_and_check_solution(), Some(0));
+    }
+
+    #[test]
+    fn lok2x4_correct() {
+        // TODO find a prettier way to write these boards
+        let mut board = Board::new(2, 4, "LOK LOK ");
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(1, 3);
+        board.blacken(1, 0);
+        board.blacken(1, 1);
+        board.blacken(1, 2);
+        board.blacken(0, 3);
+        assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    fn lok2x4_illegal_diagonal() {
+        // TODO find a prettier way to write these boards
+        let mut board = Board::new(2, 4, "LOK LOK ");
+        board.blacken(0, 0);
+        board.blacken(1, 1);
+        board.blacken(1, 2);
+        board.blacken(1, 3);
+        board.blacken(1, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        assert_eq!(board.commit_and_check_solution(), Some(1));
     }
 }
