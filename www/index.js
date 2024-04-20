@@ -7,7 +7,7 @@ document.getElementById("generate_form").addEventListener("submit", onGenerateSu
 var g_board = null;
 
 function onGenerateSubmit(evt) {
-    g_board = Board.new(parseInt(document.getElementById("rows_entry").value), parseInt(document.getElementById("columns_entry").value), document.getElementById("puzzle_entry").value);
+    g_board = Board.new(document.getElementById("puzzle_entry").value);
     renderBoard(g_board);
 }
 

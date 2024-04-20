@@ -101,19 +101,41 @@ pub struct Board {
 
 #[wasm_bindgen]
 impl Board {
-    pub fn new(rows: usize, cols: usize, contents: &str) -> Board {
+    pub fn new(contents: &str) -> Option<Board> {
         log!("puzzle: {}", contents);
+
+        let mut rows = 0;
+        let mut cols = 0;
+        for line in contents.lines() {
+            log!("row {}: {}", rows, line);
+            if cols == 0 {
+                cols = line.len();
+            }
+
+            if line.len() != cols {
+                return None;
+            }
+
+            rows += 1;
+        }
 
         let mut board = Board {
             grid: Grid::new(cols, rows, &BoardCell::blank()),
             moves: vec![],
         };
 
-        for (i, ch) in contents.chars().enumerate() {
-            board.grid.cells_mut()[i] = BoardCell::raw(ch);
+        let mut row = 0;
+        for line in contents.lines() {
+            let mut col = 0;
+            for ch in line.chars() {
+                board.grid[&RC(row, col)] = BoardCell::raw(ch);
+                col += 1;
+            }
+
+            row += 1;
         }
 
-        board
+        Some(board)
     }
 
     pub fn width(&self) -> u32 {
@@ -293,7 +315,7 @@ mod tests {
 
     #[test]
     fn lok1x4_correct() {
-        let mut board = Board::new(1, 4, "LOK ");
+        let mut board = Board::new("LOK ").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(0, 2);
@@ -303,7 +325,7 @@ mod tests {
 
     #[test]
     fn lok1x4_jump_gap() {
-        let mut board = Board::new(1, 6, "LO_K_ ");
+        let mut board = Board::new("LO_K_ ").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(0, 3);
@@ -313,7 +335,7 @@ mod tests {
 
     #[test]
     fn lok1x5_unsolvable_extra_space() {
-        let mut board = Board::new(1, 5, "LOK  ");
+        let mut board = Board::new("LOK  ").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(0, 2);
@@ -323,7 +345,7 @@ mod tests {
 
     #[test]
     fn lok1x5_unsolvable_out_of_order() {
-        let mut board = Board::new(1, 4, "LKO ");
+        let mut board = Board::new("LKO ").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 2);
         board.blacken(0, 1);
@@ -333,7 +355,7 @@ mod tests {
 
     #[test]
     fn lok1x4_out_of_order_middle() {
-        let mut board = Board::new(1, 4, "LOK ");
+        let mut board = Board::new("LOK ").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 2);
         board.blacken(0, 1);
@@ -343,7 +365,7 @@ mod tests {
 
     #[test]
     fn lok1x4_out_of_order_backwards() {
-        let mut board = Board::new(1, 4, "LOK ");
+        let mut board = Board::new("LOK ").unwrap();
         board.blacken(0, 2);
         board.blacken(0, 1);
         board.blacken(0, 0);
@@ -354,7 +376,7 @@ mod tests {
     #[test]
     fn lok2x4_correct() {
         // TODO find a prettier way to write these boards
-        let mut board = Board::new(2, 4, "LOK LOK ");
+        let mut board = Board::new("LOK \nLOK ").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(0, 2);
@@ -369,7 +391,7 @@ mod tests {
     #[test]
     fn lok2x4_illegal_diagonal() {
         // TODO find a prettier way to write these boards
-        let mut board = Board::new(2, 4, "LOK LOK ");
+        let mut board = Board::new("LOK \nLOK ").unwrap();
         board.blacken(0, 0);
         board.blacken(1, 1);
         board.blacken(1, 2);
