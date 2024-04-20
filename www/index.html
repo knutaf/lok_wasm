@@ -9,16 +9,40 @@
         font-size: 16px;
     }
 
-    .normal_cell {
-        border: 1px solid black;
+    td {
         text-align: center;
         width: 2em;
         height: 2em;
     }
+
+    .normal_cell {
+        border: 1px solid black;
+    }
+
+    .blackened {
+        color: white;
+        background-color: black;
+    }
+
+    #result_display {
+        padding: 0.5em;
+        border: 1px solid black;
+    }
+
+    .result_success {
+        background-color: cyan;
+    }
+
+    .result_fail {
+        background-color: red;
+    }
     </style>
   </head>
   <body>
-    <div id="board_display"><table style="display: none" /></div>
+    <div id="board_display"><table style="display: none"></table></div>
+    <hr />
+    <button id="check_solution">Check!</button>
+    <span id="result_display">Unsolved</span>
     <script src="./bootstrap.js"></script>
   </body>
 </html>

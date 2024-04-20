@@ -10,7 +10,7 @@ use crate::grid::{Grid, RC};
 // A macro to provide `println!(..)`-style syntax for `console.log` logging.
 macro_rules! log {
     ( $( $t:tt )* ) => {
-        if cfg!(wasm32) {
+        if cfg!(target_family = "wasm") {
             web_sys::console::log_1(&format!( $( $t )* ).into());
         } else {
             println!( $( $t )* );
@@ -23,6 +23,20 @@ macro_rules! log {
 struct BoardCell(u8);
 type BoardGrid = Grid<BoardCell>;
 // TODO: compile time assert that size of board cell is u8
+
+#[wasm_bindgen]
+impl BoardCell {
+    pub fn is_interactive(&self) -> bool {
+        *self != BoardCell::gap()
+    }
+
+    pub fn get_display(&self) -> char {
+        match self.get_raw() {
+            '_' | ' ' | '*' => ' ',
+            _ => self.get_letter().unwrap(),
+        }
+    }
+}
 
 impl BoardCell {
     fn gap() -> BoardCell {
@@ -108,8 +122,8 @@ impl Board {
         self.grid.height() as u32
     }
 
-    pub fn cells(&self) -> *const BoardCell {
-        self.grid.cells().as_ptr()
+    pub fn get(&self, row: usize, col: usize) -> BoardCell {
+        self.grid[&RC(row, col)].clone()
     }
 
     pub fn blacken(&mut self, row: usize, col: usize) {
@@ -118,55 +132,6 @@ impl Board {
         assert!(col < self.grid.width());
 
         self.moves.push(Move::Blacken(RC(row, col)));
-    }
-
-    fn is_connected_for_keyword(grid: &BoardGrid, rc1: &RC, rc2: &RC) -> bool {
-        assert_ne!(rc1, rc2);
-
-        // Must be either vertically or horizontally aligned
-        if rc1.0 != rc2.0 && rc1.1 != rc2.1 {
-            return false;
-        }
-
-        let row_walk_inc: isize = rc2.0.cmp(&rc1.0) as i8 as isize;
-        let col_walk_inc: isize = rc2.1.cmp(&rc1.1) as i8 as isize;
-        assert!(row_walk_inc == 0 || col_walk_inc == 0);
-
-        log!(
-            "Walk from {:?} to {:?}, using ({}, {})",
-            rc1,
-            rc2,
-            row_walk_inc,
-            col_walk_inc
-        );
-
-        let mut current_rc = rc1.clone();
-        loop {
-            assert!(row_walk_inc >= 0 || current_rc.0 > 0);
-            assert!(col_walk_inc >= 0 || current_rc.1 > 0);
-            current_rc = RC(
-                current_rc.0.checked_add_signed(row_walk_inc).unwrap(),
-                current_rc.1.checked_add_signed(col_walk_inc).unwrap(),
-            );
-
-            assert!(current_rc.0 < grid.height());
-            assert!(current_rc.1 < grid.width());
-
-            if current_rc == *rc2 {
-                return true;
-            }
-
-            let current = grid[&current_rc];
-            if !current.is_traversible() {
-                log!(
-                    "Not connected: {:?} is not available for traversal",
-                    current_rc
-                );
-                return false;
-            }
-        }
-
-        true
     }
 
     pub fn commit_and_check_solution(&self) -> Option<usize> {
@@ -266,6 +231,57 @@ impl Board {
         }
 
         None
+    }
+}
+
+impl Board {
+    fn is_connected_for_keyword(grid: &BoardGrid, rc1: &RC, rc2: &RC) -> bool {
+        assert_ne!(rc1, rc2);
+
+        // Must be either vertically or horizontally aligned
+        if rc1.0 != rc2.0 && rc1.1 != rc2.1 {
+            return false;
+        }
+
+        let row_walk_inc: isize = rc2.0.cmp(&rc1.0) as i8 as isize;
+        let col_walk_inc: isize = rc2.1.cmp(&rc1.1) as i8 as isize;
+        assert!(row_walk_inc == 0 || col_walk_inc == 0);
+
+        log!(
+            "Walk from {:?} to {:?}, using ({}, {})",
+            rc1,
+            rc2,
+            row_walk_inc,
+            col_walk_inc
+        );
+
+        let mut current_rc = rc1.clone();
+        loop {
+            assert!(row_walk_inc >= 0 || current_rc.0 > 0);
+            assert!(col_walk_inc >= 0 || current_rc.1 > 0);
+            current_rc = RC(
+                current_rc.0.checked_add_signed(row_walk_inc).unwrap(),
+                current_rc.1.checked_add_signed(col_walk_inc).unwrap(),
+            );
+
+            assert!(current_rc.0 < grid.height());
+            assert!(current_rc.1 < grid.width());
+
+            if current_rc == *rc2 {
+                return true;
+            }
+
+            let current = grid[&current_rc];
+            if !current.is_traversible() {
+                log!(
+                    "Not connected: {:?} is not available for traversal",
+                    current_rc
+                );
+                return false;
+            }
+        }
+
+        true
     }
 }
 
