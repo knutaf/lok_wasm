@@ -5,6 +5,7 @@ use std::ops::{Deref, DerefMut, Index, IndexMut};
 /// It dereferences to a slice of [`CellType`], so you can directly manipulate
 /// it via regular (mutable) slice methods. In addition, you can index
 /// into it by `(row, column)` pairs.
+#[derive(Clone)]
 pub struct Grid<CellType>
 where
     CellType: Clone,

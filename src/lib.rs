@@ -1,3 +1,5 @@
+use wasm_bindgen::prelude::*;
+
 extern crate web_sys;
 
 mod grid;
@@ -13,20 +15,39 @@ macro_rules! log {
 }
 
 #[wasm_bindgen]
+#[derive(Copy, Clone)]
+struct BoardCell(u8);
+type BoardGrid = Grid<BoardCell>;
+// TODO: compile time assert that size of board cell is u8
+
+impl BoardCell {
+    fn blank() -> BoardCell {
+        BoardCell(' ' as u8)
+    }
+
+    fn letter(c: char) -> BoardCell {
+        assert!(c.is_ascii());
+        BoardCell(c as u8)
+    }
+}
+
+#[wasm_bindgen]
 pub struct Board {
-    grid: Grid<u8>,
+    grid: BoardGrid,
+    grid_stack: Vec<BoardGrid>,
 }
 
 #[wasm_bindgen]
 impl Board {
-    pub fn new() -> Board {
+    pub fn new(rows: usize, cols: usize) -> Board {
         let mut board = Board {
-            grid: Grid::new(4, 1, &(' ' as u8)),
+            grid: Grid::new(cols, rows, &BoardCell::blank()),
+            grid_stack: vec![],
         };
 
-        board.grid[RC(0, 0)] = 'L' as u8;
-        board.grid[RC(0, 1)] = 'O' as u8;
-        board.grid[RC(0, 2)] = 'K' as u8;
+        board.grid[RC(0, 0)] = BoardCell::letter('L');
+        board.grid[RC(0, 1)] = BoardCell::letter('O');
+        board.grid[RC(0, 2)] = BoardCell::letter('K');
 
         board
     }
@@ -39,14 +60,19 @@ impl Board {
         self.grid.height() as u32
     }
 
-    pub fn cells(&self) -> *const u8 {
+    pub fn cells(&self) -> *const BoardCell {
         self.grid.cells()
     }
 }
 
-use wasm_bindgen::prelude::*;
+/*
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[wasm_bindgen]
-extern "C" {
-    fn alert(s: &str);
+    #[test]
+    fn simple() {
+        assert_eq!(result, 4);
+    }
 }
+*/
