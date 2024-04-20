@@ -239,13 +239,23 @@ mod tests {
     }
 
     #[test]
-    fn lok5_unsolvable() {
+    fn lok5_unsolvable_extra_space() {
         let mut board = Board::new(1, 5, "LOK  ");
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(0, 2);
         board.blacken(0, 3);
-        assert!(board.commit_and_check_solution() == Some(4));
+        assert_eq!(board.commit_and_check_solution(), Some(4));
+    }
+
+    #[test]
+    fn lok5_unsolvable_out_of_order() {
+        let mut board = Board::new(1, 4, "LKO ");
+        board.blacken(0, 0);
+        board.blacken(0, 2);
+        board.blacken(0, 1);
+        board.blacken(0, 3);
+        assert_eq!(board.commit_and_check_solution(), Some(1));
     }
 
     #[test]
@@ -255,7 +265,7 @@ mod tests {
         board.blacken(0, 2);
         board.blacken(0, 1);
         board.blacken(0, 3);
-        assert!(board.commit_and_check_solution() == Some(1));
+        assert_eq!(board.commit_and_check_solution(), Some(1));
     }
 
     #[test]
@@ -265,6 +275,6 @@ mod tests {
         board.blacken(0, 1);
         board.blacken(0, 0);
         board.blacken(0, 3);
-        assert!(board.commit_and_check_solution() == Some(0));
+        assert_eq!(board.commit_and_check_solution(), Some(0));
     }
 }
