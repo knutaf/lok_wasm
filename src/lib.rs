@@ -18,6 +18,8 @@ macro_rules! log {
     }
 }
 
+const KNOWN_KEYWORDS: [&'static str; 2] = ["LOK", "TLAK"];
+
 #[wasm_bindgen]
 #[derive(Copy, Clone, PartialEq)]
 struct BoardCell(u8);
@@ -87,13 +89,13 @@ enum Move {
 
 #[derive(Clone, Debug)]
 enum BoardState {
-    Idle,
-    Keyword(&'static str, Vec<RC>, Vec<RC>),
+    GatheringKeyword(String, Vec<RC>),
+    ExecutingKeyword(&'static str, Vec<RC>),
 }
 
 impl BoardState {
-    fn start_keyword(keyword: &'static str, first_rc: &RC) -> BoardState {
-        BoardState::Keyword(keyword, vec![first_rc.clone()], vec![])
+    fn idle() -> BoardState {
+        BoardState::GatheringKeyword(String::new(), vec![])
     }
 }
 
@@ -164,83 +166,19 @@ impl Board {
 
     pub fn commit_and_check_solution(&self) -> Option<usize> {
         let mut simgrid = self.grid.clone();
-        let mut state = BoardState::Idle;
+        let mut state = BoardState::idle();
         for (mv_num, mv) in self.moves.iter().enumerate() {
             log!("{:2}: state {:?}, move {:?}", mv_num, state, mv);
 
             state = match mv {
                 Move::Blacken(target_rc) => {
                     let target = simgrid[target_rc].clone();
+
                     match state {
-                        BoardState::Idle => {
-                            if let Some(letter) = target.get_letter() {
-                                match letter {
-                                    'L' => BoardState::start_keyword("LOK", target_rc),
-                                    'T' => BoardState::start_keyword("TLAK", target_rc),
-                                    _ => {
-                                        log!("Letter {} not valid", letter);
-                                        return Some(mv_num);
-                                    }
-                                }
-                            } else {
-                                log!("Not a letter: {}", target.get_raw());
-                                return Some(mv_num);
-                            }
-                        }
-                        BoardState::Keyword(keyword, keyword_rcs, exec_rcs) => {
-                            if keyword_rcs.len() == keyword.len() {
-                                match keyword {
-                                    "LOK" => {
-                                        if target.is_blackened() {
-                                            log!("{:?} already blackened", target_rc);
-                                            return Some(mv_num);
-                                        }
-
-                                        simgrid[target_rc] = BoardCell::blackened();
-                                        BoardState::Idle
-                                    }
-                                    "TLAK" => {
-                                        if target.is_blackened() {
-                                            log!("{:?} already blackened", target_rc);
-                                            return Some(mv_num);
-                                        }
-
-                                        if let Some(last_exec_rc) = exec_rcs.last() {
-                                            if !Board::is_adjacent(
-                                                &simgrid,
-                                                last_exec_rc,
-                                                target_rc,
-                                            ) {
-                                                log!(
-                                                    "{:?} not adjacent to {:?} for TLAK blacken",
-                                                    last_exec_rc,
-                                                    target_rc
-                                                );
-
-                                                return Some(mv_num);
-                                            }
-                                        }
-
-                                        simgrid[target_rc] = BoardCell::blackened();
-
-                                        if exec_rcs.len() == 1 {
-                                            BoardState::Idle
-                                        } else {
-                                            let mut next_exec_rcs = exec_rcs.clone();
-                                            next_exec_rcs.push(target_rc.clone());
-                                            BoardState::Keyword(
-                                                keyword,
-                                                keyword_rcs.clone(),
-                                                next_exec_rcs,
-                                            )
-                                        }
-                                    }
-                                    _ => {
-                                        panic!("Impossible state with keyword {}", keyword);
-                                    }
-                                }
-                            } else {
-                                let last_rc = keyword_rcs.last().unwrap();
+                        BoardState::GatheringKeyword(keyword, keyword_rcs) => {
+                            // If this is not the first letter in this keyword, check to make sure the new one is
+                            // connected to the most recent letter that was accepted.
+                            if let Some(last_rc) = keyword_rcs.last() {
                                 if !Board::is_connected_for_keyword(
                                     &simgrid,
                                     keyword_rcs.last().unwrap(),
@@ -253,36 +191,89 @@ impl Board {
                                     );
                                     return Some(mv_num);
                                 }
+                            }
 
-                                let next_char =
-                                    keyword[keyword_rcs.len()..].chars().next().unwrap();
-                                if let Some(letter) = target.get_letter() {
-                                    if letter == next_char {
-                                        let mut next_keyword_rcs = keyword_rcs.clone();
-                                        next_keyword_rcs.push(target_rc.clone());
+                            // Keywords consist of only letters.
+                            if let Some(letter) = target.get_letter() {
+                                let mut new_keyword = keyword.clone();
+                                new_keyword.push(letter);
 
-                                        // Have now accumulated a whole keyword. Black it out.
-                                        if next_keyword_rcs.len() == keyword.len() {
-                                            for rc in next_keyword_rcs.iter() {
-                                                simgrid[rc] = BoardCell::blackened();
-                                            }
-                                        }
-
-                                        BoardState::Keyword(
-                                            keyword,
-                                            next_keyword_rcs,
-                                            exec_rcs.clone(),
-                                        )
-                                    } else {
-                                        log!("Letter {} not valid. Expected {}", letter, next_char);
-                                        return Some(mv_num);
-                                    }
-                                } else {
-                                    log!("Not a letter: {}", target.get_raw());
+                                // Check to see if the keyword gathered so far could possibly be one of the known
+                                // keywords. If not, the solution fails here.
+                                if !KNOWN_KEYWORDS
+                                    .iter()
+                                    .any(|known_keyword| known_keyword.starts_with(&new_keyword))
+                                {
+                                    log!("{} cannot be any known keyword", new_keyword);
                                     return Some(mv_num);
                                 }
+
+                                // So far this is a possible keyword, so accept the RC of the latest letter.
+                                let mut new_keyword_rcs = keyword_rcs.clone();
+                                new_keyword_rcs.push(target_rc.clone());
+
+                                // If the keyword so far matches a known keyword, then accept it and transition to the
+                                // executing state. Otherwise, continue gathering.
+                                if let Some(known_keyword) = KNOWN_KEYWORDS
+                                    .iter()
+                                    .find(|known_keyword| new_keyword == **known_keyword)
+                                {
+                                    // Have now accumulated a whole keyword. Black it out.
+                                    for rc in new_keyword_rcs.iter() {
+                                        simgrid[rc] = BoardCell::blackened();
+                                    }
+
+                                    BoardState::ExecutingKeyword(known_keyword, vec![])
+                                } else {
+                                    BoardState::GatheringKeyword(new_keyword, new_keyword_rcs)
+                                }
+                            } else {
+                                log!("Not a letter: {}", target.get_raw());
+                                return Some(mv_num);
                             }
                         }
+                        BoardState::ExecutingKeyword(keyword, exec_rcs) => match keyword {
+                            "LOK" => {
+                                if target.is_blackened() {
+                                    log!("{:?} already blackened", target_rc);
+                                    return Some(mv_num);
+                                }
+
+                                simgrid[target_rc] = BoardCell::blackened();
+                                BoardState::idle()
+                            }
+                            "TLAK" => {
+                                if target.is_blackened() {
+                                    log!("{:?} already blackened", target_rc);
+                                    return Some(mv_num);
+                                }
+
+                                if let Some(last_exec_rc) = exec_rcs.last() {
+                                    if !Board::is_adjacent(&simgrid, last_exec_rc, target_rc) {
+                                        log!(
+                                            "{:?} not adjacent to {:?} for TLAK blacken",
+                                            last_exec_rc,
+                                            target_rc
+                                        );
+
+                                        return Some(mv_num);
+                                    }
+                                }
+
+                                simgrid[target_rc] = BoardCell::blackened();
+
+                                if exec_rcs.len() == 1 {
+                                    BoardState::idle()
+                                } else {
+                                    let mut next_exec_rcs = exec_rcs.clone();
+                                    next_exec_rcs.push(target_rc.clone());
+                                    BoardState::ExecutingKeyword(keyword, next_exec_rcs)
+                                }
+                            }
+                            _ => {
+                                panic!("Impossible state with keyword {}", keyword);
+                            }
+                        },
                     }
                 }
             };
