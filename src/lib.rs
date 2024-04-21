@@ -301,6 +301,11 @@ impl Board {
 
 impl Board {
     fn is_connected_for_keyword(grid: &BoardGrid, rc1: &RC, rc2: &RC) -> bool {
+        // TODO this probably needs to change when I add conductors
+        Self::is_adjacent(grid, rc1, rc2)
+    }
+
+    fn is_adjacent(grid: &BoardGrid, rc1: &RC, rc2: &RC) -> bool {
         assert_ne!(rc1, rc2);
 
         // Must be either vertically or horizontally aligned
@@ -348,12 +353,6 @@ impl Board {
 
         true
     }
-
-    fn is_adjacent(grid: &BoardGrid, rc1: &RC, rc2: &RC) -> bool {
-        assert_ne!(rc1, rc2);
-        // TODO implement
-        true
-    }
 }
 
 #[cfg(test)]
@@ -371,12 +370,37 @@ mod tests {
     }
 
     #[test]
+    fn lok1x4_correct_non_blank() {
+        let mut board = Board::new("LOKQ").unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
     fn lok1x4_jump_gap() {
         let mut board = Board::new("LO_K_ ").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(0, 3);
         board.blacken(0, 5);
+        assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    fn lok_correct_jump_blackened() {
+        let mut board = Board::new("LO KLOK ").unwrap();
+        board.blacken(0, 4);
+        board.blacken(0, 5);
+        board.blacken(0, 6);
+        board.blacken(0, 2);
+
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 3);
+        board.blacken(0, 7);
         assert_eq!(board.commit_and_check_solution(), None);
     }
 
@@ -472,5 +496,17 @@ mod tests {
         board.blacken(0, 4);
         board.blacken(0, 5);
         assert_eq!(board.commit_and_check_solution(), Some(3));
+    }
+
+    #[test]
+    fn tlak_correct_non_blank() {
+        let mut board = Board::new("TLAKQQ").unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        board.blacken(0, 4);
+        board.blacken(0, 5);
+        assert_eq!(board.commit_and_check_solution(), None);
     }
 }
