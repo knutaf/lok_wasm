@@ -90,7 +90,8 @@ enum Move {
 #[derive(Clone, Debug)]
 enum BoardState {
     GatheringKeyword(String, Vec<RC>),
-    ExecutingKeyword(&'static str, Vec<RC>),
+    ExecutingLOK,
+    ExecutingTLAK(Vec<RC>),
 }
 
 impl BoardState {
@@ -223,7 +224,13 @@ impl Board {
                                         simgrid[rc] = BoardCell::blackened();
                                     }
 
-                                    BoardState::ExecutingKeyword(known_keyword, vec![])
+                                    match *known_keyword {
+                                        "LOK" => BoardState::ExecutingLOK,
+                                        "TLAK" => BoardState::ExecutingTLAK(vec![]),
+                                        _ => {
+                                            panic!("Impossible unknown keyword {}", *known_keyword)
+                                        }
+                                    }
                                 } else {
                                     BoardState::GatheringKeyword(new_keyword, new_keyword_rcs)
                                 }
@@ -232,48 +239,43 @@ impl Board {
                                 return Some(mv_num);
                             }
                         }
-                        BoardState::ExecutingKeyword(keyword, exec_rcs) => match keyword {
-                            "LOK" => {
-                                if target.is_blackened() {
-                                    log!("{:?} already blackened", target_rc);
+                        BoardState::ExecutingLOK => {
+                            if target.is_blackened() {
+                                log!("{:?} already blackened", target_rc);
+                                return Some(mv_num);
+                            }
+
+                            simgrid[target_rc] = BoardCell::blackened();
+                            BoardState::idle()
+                        }
+                        BoardState::ExecutingTLAK(exec_rcs) => {
+                            if target.is_blackened() {
+                                log!("{:?} already blackened", target_rc);
+                                return Some(mv_num);
+                            }
+
+                            if let Some(last_exec_rc) = exec_rcs.last() {
+                                if !Board::is_adjacent(&simgrid, last_exec_rc, target_rc) {
+                                    log!(
+                                        "{:?} not adjacent to {:?} for TLAK blacken",
+                                        last_exec_rc,
+                                        target_rc
+                                    );
+
                                     return Some(mv_num);
                                 }
+                            }
 
-                                simgrid[target_rc] = BoardCell::blackened();
+                            simgrid[target_rc] = BoardCell::blackened();
+
+                            if exec_rcs.len() == 1 {
                                 BoardState::idle()
+                            } else {
+                                let mut next_exec_rcs = exec_rcs.clone();
+                                next_exec_rcs.push(target_rc.clone());
+                                BoardState::ExecutingTLAK(next_exec_rcs)
                             }
-                            "TLAK" => {
-                                if target.is_blackened() {
-                                    log!("{:?} already blackened", target_rc);
-                                    return Some(mv_num);
-                                }
-
-                                if let Some(last_exec_rc) = exec_rcs.last() {
-                                    if !Board::is_adjacent(&simgrid, last_exec_rc, target_rc) {
-                                        log!(
-                                            "{:?} not adjacent to {:?} for TLAK blacken",
-                                            last_exec_rc,
-                                            target_rc
-                                        );
-
-                                        return Some(mv_num);
-                                    }
-                                }
-
-                                simgrid[target_rc] = BoardCell::blackened();
-
-                                if exec_rcs.len() == 1 {
-                                    BoardState::idle()
-                                } else {
-                                    let mut next_exec_rcs = exec_rcs.clone();
-                                    next_exec_rcs.push(target_rc.clone());
-                                    BoardState::ExecutingKeyword(keyword, next_exec_rcs)
-                                }
-                            }
-                            _ => {
-                                panic!("Impossible state with keyword {}", keyword);
-                            }
-                        },
+                        }
                     }
                 }
             };
