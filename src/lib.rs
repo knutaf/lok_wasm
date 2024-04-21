@@ -85,17 +85,16 @@ enum Move {
     Blacken(RC),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum BoardState {
     Idle,
-    L(RC),
-    LO(RC, RC),
-    LOK(RC, RC, RC),
-    T(RC),
-    TL(RC, RC),
-    TLA(RC, RC, RC),
-    TLAK(RC, RC, RC, RC),
-    TLAK1(RC, RC, RC, RC, RC),
+    Keyword(&'static str, Vec<RC>, Vec<RC>),
+}
+
+impl BoardState {
+    fn start_keyword(keyword: &'static str, first_rc: &RC) -> BoardState {
+        BoardState::Keyword(keyword, vec![first_rc.clone()], vec![])
+    }
 }
 
 #[wasm_bindgen]
@@ -169,19 +168,15 @@ impl Board {
         for (mv_num, mv) in self.moves.iter().enumerate() {
             log!("{:2}: state {:?}, move {:?}", mv_num, state, mv);
 
-            match mv {
+            state = match mv {
                 Move::Blacken(target_rc) => {
                     let target = simgrid[target_rc].clone();
                     match state {
                         BoardState::Idle => {
                             if let Some(letter) = target.get_letter() {
                                 match letter {
-                                    'L' => {
-                                        state = BoardState::L(target_rc.clone());
-                                    }
-                                    'T' => {
-                                        state = BoardState::T(target_rc.clone());
-                                    }
+                                    'L' => BoardState::start_keyword("LOK", target_rc),
+                                    'T' => BoardState::start_keyword("TLAK", target_rc),
                                     _ => {
                                         log!("Letter {} not valid", letter);
                                         return Some(mv_num);
@@ -192,176 +187,105 @@ impl Board {
                                 return Some(mv_num);
                             }
                         }
-                        BoardState::L(rc_l) => {
-                            if !Board::is_connected_for_keyword(&simgrid, &rc_l, target_rc) {
-                                log!("{:?} not connected to {:?} for keyword", rc_l, target_rc);
-                                return Some(mv_num);
-                            }
+                        BoardState::Keyword(keyword, keyword_rcs, exec_rcs) => {
+                            if keyword_rcs.len() == keyword.len() {
+                                match keyword {
+                                    "LOK" => {
+                                        if target.is_blackened() {
+                                            log!("{:?} already blackened", target_rc);
+                                            return Some(mv_num);
+                                        }
 
-                            if let Some(letter) = target.get_letter() {
-                                match letter {
-                                    'O' => {
-                                        state = BoardState::LO(rc_l.clone(), target_rc.clone());
-                                    }
-                                    _ => {
-                                        log!("Letter {} not valid. Expected O", letter);
-                                        return Some(mv_num);
-                                    }
-                                }
-                            } else {
-                                log!("Not a letter: {}", target.get_raw());
-                                return Some(mv_num);
-                            }
-                        }
-                        BoardState::LO(rc_l, rc_o) => {
-                            if !Board::is_connected_for_keyword(&simgrid, &rc_o, target_rc) {
-                                log!("{:?} not connected to {:?} for keyword", rc_o, target_rc);
-                                return Some(mv_num);
-                            }
-
-                            if let Some(letter) = target.get_letter() {
-                                match letter {
-                                    'K' => {
-                                        state = BoardState::LOK(
-                                            rc_l.clone(),
-                                            rc_o.clone(),
-                                            target_rc.clone(),
-                                        );
-                                        simgrid[&rc_l] = BoardCell::blackened();
-                                        simgrid[&rc_o] = BoardCell::blackened();
                                         simgrid[target_rc] = BoardCell::blackened();
+                                        BoardState::Idle
                                     }
-                                    _ => {
-                                        log!("Letter {} not valid. Expected K", letter);
-                                        return Some(mv_num);
-                                    }
-                                }
-                            } else {
-                                log!("Not a letter: {}", target.get_raw());
-                                return Some(mv_num);
-                            }
-                        }
-                        BoardState::LOK(rc_l, rc_o, rc_k) => {
-                            if target.is_blackened() {
-                                log!("{:?} already blackened", target_rc);
-                                return Some(mv_num);
-                            }
+                                    "TLAK" => {
+                                        if target.is_blackened() {
+                                            log!("{:?} already blackened", target_rc);
+                                            return Some(mv_num);
+                                        }
 
-                            simgrid[target_rc] = BoardCell::blackened();
-                            state = BoardState::Idle;
-                        }
-                        BoardState::T(rc_t) => {
-                            if !Board::is_connected_for_keyword(&simgrid, &rc_t, target_rc) {
-                                log!("{:?} not connected to {:?} for keyword", rc_t, target_rc);
-                                return Some(mv_num);
-                            }
+                                        if let Some(last_exec_rc) = exec_rcs.last() {
+                                            if !Board::is_adjacent(
+                                                &simgrid,
+                                                last_exec_rc,
+                                                target_rc,
+                                            ) {
+                                                log!(
+                                                    "{:?} not adjacent to {:?} for TLAK blacken",
+                                                    last_exec_rc,
+                                                    target_rc
+                                                );
 
-                            if let Some(letter) = target.get_letter() {
-                                match letter {
-                                    'L' => {
-                                        state = BoardState::TL(rc_t.clone(), target_rc.clone());
-                                    }
-                                    _ => {
-                                        log!("Letter {} not valid. Expected L", letter);
-                                        return Some(mv_num);
-                                    }
-                                }
-                            } else {
-                                log!("Not a letter: {}", target.get_raw());
-                                return Some(mv_num);
-                            }
-                        }
-                        BoardState::TL(rc_t, rc_l) => {
-                            if !Board::is_connected_for_keyword(&simgrid, &rc_l, target_rc) {
-                                log!("{:?} not connected to {:?} for keyword", rc_l, target_rc);
-                                return Some(mv_num);
-                            }
+                                                return Some(mv_num);
+                                            }
+                                        }
 
-                            if let Some(letter) = target.get_letter() {
-                                match letter {
-                                    'A' => {
-                                        state = BoardState::TLA(
-                                            rc_t.clone(),
-                                            rc_l.clone(),
-                                            target_rc.clone(),
-                                        );
-                                    }
-                                    _ => {
-                                        log!("Letter {} not valid. Expected A", letter);
-                                        return Some(mv_num);
-                                    }
-                                }
-                            } else {
-                                log!("Not a letter: {}", target.get_raw());
-                                return Some(mv_num);
-                            }
-                        }
-                        BoardState::TLA(rc_t, rc_l, rc_a) => {
-                            if !Board::is_connected_for_keyword(&simgrid, &rc_a, target_rc) {
-                                log!("{:?} not connected to {:?} for keyword", rc_a, target_rc);
-                                return Some(mv_num);
-                            }
-
-                            if let Some(letter) = target.get_letter() {
-                                match letter {
-                                    'K' => {
-                                        state = BoardState::TLAK(
-                                            rc_t.clone(),
-                                            rc_l.clone(),
-                                            rc_a.clone(),
-                                            target_rc.clone(),
-                                        );
-                                        simgrid[&rc_t] = BoardCell::blackened();
-                                        simgrid[&rc_l] = BoardCell::blackened();
-                                        simgrid[&rc_a] = BoardCell::blackened();
                                         simgrid[target_rc] = BoardCell::blackened();
+
+                                        if exec_rcs.len() == 1 {
+                                            BoardState::Idle
+                                        } else {
+                                            let mut next_exec_rcs = exec_rcs.clone();
+                                            next_exec_rcs.push(target_rc.clone());
+                                            BoardState::Keyword(
+                                                keyword,
+                                                keyword_rcs.clone(),
+                                                next_exec_rcs,
+                                            )
+                                        }
                                     }
                                     _ => {
-                                        log!("Letter {} not valid. Expected K", letter);
-                                        return Some(mv_num);
+                                        panic!("Impossible state with keyword {}", keyword);
                                     }
                                 }
                             } else {
-                                log!("Not a letter: {}", target.get_raw());
-                                return Some(mv_num);
-                            }
-                        }
-                        BoardState::TLAK(rc_t, rc_l, rc_a, rc_k) => {
-                            if target.is_blackened() {
-                                log!("{:?} already blackened", target_rc);
-                                return Some(mv_num);
-                            }
+                                let last_rc = keyword_rcs.last().unwrap();
+                                if !Board::is_connected_for_keyword(
+                                    &simgrid,
+                                    keyword_rcs.last().unwrap(),
+                                    target_rc,
+                                ) {
+                                    log!(
+                                        "{:?} not connected to {:?} for keyword",
+                                        last_rc,
+                                        target_rc
+                                    );
+                                    return Some(mv_num);
+                                }
 
-                            simgrid[target_rc] = BoardCell::blackened();
-                            state = BoardState::TLAK1(
-                                rc_t.clone(),
-                                rc_l.clone(),
-                                rc_a.clone(),
-                                rc_k.clone(),
-                                target_rc.clone(),
-                            );
-                        }
-                        BoardState::TLAK1(rc_t, rc_l, rc_a, rc_k, rc_black1) => {
-                            if target.is_blackened() {
-                                log!("{:?} already blackened", target_rc);
-                                return Some(mv_num);
-                            }
+                                let next_char =
+                                    keyword[keyword_rcs.len()..].chars().next().unwrap();
+                                if let Some(letter) = target.get_letter() {
+                                    if letter == next_char {
+                                        let mut next_keyword_rcs = keyword_rcs.clone();
+                                        next_keyword_rcs.push(target_rc.clone());
 
-                            if !Board::is_adjacent(&simgrid, &rc_black1, target_rc) {
-                                log!(
-                                    "{:?} not adjacent to {:?} for TLAK blacken",
-                                    rc_black1,
-                                    target_rc
-                                );
-                                return Some(mv_num);
-                            }
+                                        // Have now accumulated a whole keyword. Black it out.
+                                        if next_keyword_rcs.len() == keyword.len() {
+                                            for rc in next_keyword_rcs.iter() {
+                                                simgrid[rc] = BoardCell::blackened();
+                                            }
+                                        }
 
-                            simgrid[target_rc] = BoardCell::blackened();
-                            state = BoardState::Idle;
+                                        BoardState::Keyword(
+                                            keyword,
+                                            next_keyword_rcs,
+                                            exec_rcs.clone(),
+                                        )
+                                    } else {
+                                        log!("Letter {} not valid. Expected {}", letter, next_char);
+                                        return Some(mv_num);
+                                    }
+                                } else {
+                                    log!("Not a letter: {}", target.get_raw());
+                                    return Some(mv_num);
+                                }
+                            }
                         }
                     }
                 }
-            }
+            };
         }
 
         for (rc, cell) in simgrid.enumerate_row_col() {
