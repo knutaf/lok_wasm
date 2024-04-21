@@ -51,7 +51,7 @@ impl BoardCell {
 
     fn raw(c: char) -> BoardCell {
         assert!(c.is_ascii());
-        BoardCell(c as u8)
+        BoardCell(c.to_ascii_uppercase() as u8)
     }
 
     fn blackened() -> BoardCell {
