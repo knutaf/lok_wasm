@@ -85,8 +85,12 @@ function renderBoard(board) {
             cell.boardCol = c;
 
             if (boardCell.is_interactive()) {
-                cell.className = "normal_cell";
+                cell.classList.add("normal_cell");
                 cell.addEventListener("click", onCellClick);
+            }
+
+            if (boardCell.is_blackened()) {
+                cell.classList.add("blackened");
             }
 
             cell.textContent = boardCell.get_display();

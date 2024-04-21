@@ -22,48 +22,58 @@ const KNOWN_KEYWORDS: [&'static str; 3] = ["LOK", "TLAK", "TA"];
 
 #[wasm_bindgen]
 #[derive(Copy, Clone, PartialEq)]
-struct BoardCell(u8);
+struct BoardCell {
+    letter: Option<char>,
+    is_blackened: bool,
+}
+
 type BoardGrid = Grid<BoardCell>;
-// TODO: compile time assert that size of board cell is u8
 
 #[wasm_bindgen]
 impl BoardCell {
     pub fn is_interactive(&self) -> bool {
-        *self != BoardCell::gap()
+        self.letter.is_some()
+    }
+
+    pub fn is_blackened(&self) -> bool {
+        self.is_blackened
     }
 
     pub fn get_display(&self) -> char {
-        match self.get_raw() {
-            '_' | ' ' | '*' => ' ',
-            _ => self.get_letter().unwrap(),
+        if let Some(ch) = self.letter {
+            ch
+        } else {
+            ' '
         }
     }
 }
 
 impl BoardCell {
     fn gap() -> BoardCell {
-        BoardCell('_' as u8)
+        BoardCell {
+            letter: None,
+            is_blackened: false,
+        }
+    }
+
+    fn raw(letter: char) -> BoardCell {
+        assert!(letter.is_ascii());
+
+        BoardCell {
+            letter: match letter {
+                '_' => None,
+                _ => Some(letter.to_ascii_uppercase()),
+            },
+            is_blackened: false,
+        }
     }
 
     fn blank() -> BoardCell {
-        BoardCell(' ' as u8)
-    }
-
-    fn raw(c: char) -> BoardCell {
-        assert!(c.is_ascii());
-        BoardCell(c.to_ascii_uppercase() as u8)
-    }
-
-    fn blackened() -> BoardCell {
-        BoardCell('*' as u8)
-    }
-
-    fn is_blackened(&self) -> bool {
-        *self == BoardCell::blackened()
+        BoardCell::raw(' ')
     }
 
     fn is_done(&self) -> bool {
-        *self == BoardCell::gap() || self.is_blackened()
+        self.letter.is_none() || self.is_blackened()
     }
 
     fn is_traversible(&self) -> bool {
@@ -71,14 +81,19 @@ impl BoardCell {
     }
 
     fn get_letter(&self) -> Option<char> {
-        match self.get_raw() {
-            ' ' | '*' => None,
-            _ => Some(self.get_raw()),
+        match self.letter {
+            None => None,
+            Some(' ') => None,
+            Some(ch) => Some(ch),
         }
     }
 
     fn get_raw(&self) -> char {
-        self.0 as char
+        self.letter.unwrap()
+    }
+
+    fn blacken(&mut self) {
+        self.is_blackened = true;
     }
 }
 
@@ -227,7 +242,7 @@ impl Board {
                                 {
                                     // Have now accumulated a whole keyword. Black it out.
                                     for rc in new_keyword_rcs.iter() {
-                                        simgrid[rc] = BoardCell::blackened();
+                                        simgrid[rc].blacken();
                                     }
 
                                     match *known_keyword {
@@ -247,7 +262,7 @@ impl Board {
                             }
                         }
                         BoardState::ExecutingLOK => {
-                            simgrid[target_rc] = BoardCell::blackened();
+                            simgrid[target_rc].blacken();
                             BoardState::idle()
                         }
                         BoardState::ExecutingTLAK(exec_rcs) => {
@@ -263,7 +278,7 @@ impl Board {
                                 }
                             }
 
-                            simgrid[target_rc] = BoardCell::blackened();
+                            simgrid[target_rc].blacken();
 
                             if exec_rcs.len() == 1 {
                                 BoardState::idle()
@@ -288,17 +303,23 @@ impl Board {
                                     log!("TA choosing letter {}", letter);
                                 }
 
-                                simgrid[target_rc] = BoardCell::blackened();
+                                simgrid[target_rc].blacken();
 
                                 // If there are any more of this chosen letter on the board, then the state is still
                                 // waiting for those to be blackened out. Otherwise, the TA is done.
-                                if simgrid
-                                    .enumerate_row_col()
-                                    .any(|(_rc, cell)| cell.get_raw() == letter)
-                                {
-                                    BoardState::ExecutingTA(Some(letter))
-                                } else {
+                                let mut has_completed_all_letters = true;
+                                for (rc, cell) in simgrid.enumerate_row_col() {
+                                    if !cell.is_blackened() && cell.get_raw() == letter {
+                                        log!("{:?} is still {}", rc, letter);
+                                        has_completed_all_letters = false;
+                                        break;
+                                    }
+                                }
+
+                                if has_completed_all_letters {
                                     BoardState::idle()
+                                } else {
+                                    BoardState::ExecutingTA(Some(letter))
                                 }
                             } else {
                                 log!("Not a letter: {}", target.get_raw());
