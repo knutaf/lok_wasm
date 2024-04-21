@@ -18,7 +18,7 @@ macro_rules! log {
     }
 }
 
-const KNOWN_KEYWORDS: [&'static str; 2] = ["LOK", "TLAK"];
+const KNOWN_KEYWORDS: [&'static str; 3] = ["LOK", "TLAK", "TA"];
 
 #[wasm_bindgen]
 #[derive(Copy, Clone, PartialEq)]
@@ -92,6 +92,7 @@ enum BoardState {
     GatheringKeyword(String, Vec<RC>),
     ExecutingLOK,
     ExecutingTLAK(Vec<RC>),
+    ExecutingTA(Option<char>),
 }
 
 impl BoardState {
@@ -175,6 +176,11 @@ impl Board {
                 Move::Blacken(target_rc) => {
                     let target = simgrid[target_rc].clone();
 
+                    if target.is_blackened() {
+                        log!("{:?} already blackened", target_rc);
+                        return Some(mv_num);
+                    }
+
                     match state {
                         BoardState::GatheringKeyword(keyword, keyword_rcs) => {
                             // If this is not the first letter in this keyword, check to make sure the new one is
@@ -227,6 +233,7 @@ impl Board {
                                     match *known_keyword {
                                         "LOK" => BoardState::ExecutingLOK,
                                         "TLAK" => BoardState::ExecutingTLAK(vec![]),
+                                        "TA" => BoardState::ExecutingTA(None),
                                         _ => {
                                             panic!("Impossible unknown keyword {}", *known_keyword)
                                         }
@@ -240,20 +247,10 @@ impl Board {
                             }
                         }
                         BoardState::ExecutingLOK => {
-                            if target.is_blackened() {
-                                log!("{:?} already blackened", target_rc);
-                                return Some(mv_num);
-                            }
-
                             simgrid[target_rc] = BoardCell::blackened();
                             BoardState::idle()
                         }
                         BoardState::ExecutingTLAK(exec_rcs) => {
-                            if target.is_blackened() {
-                                log!("{:?} already blackened", target_rc);
-                                return Some(mv_num);
-                            }
-
                             if let Some(last_exec_rc) = exec_rcs.last() {
                                 if !Board::is_adjacent(&simgrid, last_exec_rc, target_rc) {
                                     log!(
@@ -276,16 +273,59 @@ impl Board {
                                 BoardState::ExecutingTLAK(next_exec_rcs)
                             }
                         }
+                        BoardState::ExecutingTA(chosen_letter_opt) => {
+                            if let Some(letter) = target.get_letter() {
+                                if let Some(chosen_letter) = chosen_letter_opt {
+                                    if letter != chosen_letter {
+                                        log!(
+                                            "Letter {} does not match TA chosen letter {}",
+                                            letter,
+                                            chosen_letter
+                                        );
+                                        return Some(mv_num);
+                                    }
+                                } else {
+                                    log!("TA choosing letter {}", letter);
+                                }
+
+                                simgrid[target_rc] = BoardCell::blackened();
+
+                                // If there are any more of this chosen letter on the board, then the state is still
+                                // waiting for those to be blackened out. Otherwise, the TA is done.
+                                if simgrid
+                                    .enumerate_row_col()
+                                    .any(|(_rc, cell)| cell.get_raw() == letter)
+                                {
+                                    BoardState::ExecutingTA(Some(letter))
+                                } else {
+                                    BoardState::idle()
+                                }
+                            } else {
+                                log!("Not a letter: {}", target.get_raw());
+                                return Some(mv_num);
+                            }
+                        }
                     }
                 }
             };
         }
 
-        for (rc, cell) in simgrid.enumerate_row_col() {
-            if !cell.is_done() {
-                log!("{:?} not done", rc);
+        // Must be back in the idle state before considering the board to be done.
+        if let BoardState::GatheringKeyword(keyword, _) = state {
+            if !keyword.is_empty() {
+                log!("Partial keyword {} found. Not done.", keyword);
                 return Some(self.moves.len());
             }
+
+            for (rc, cell) in simgrid.enumerate_row_col() {
+                if !cell.is_done() {
+                    log!("{:?} not done", rc);
+                    return Some(self.moves.len());
+                }
+            }
+        } else {
+            log!("State {:?} is not idle", state);
+            return Some(self.moves.len());
         }
 
         None
@@ -373,6 +413,13 @@ mod tests {
     }
 
     #[test]
+    fn partial_keyword() {
+        let mut board = Board::new("L").unwrap();
+        board.blacken(0, 0);
+        assert_eq!(board.commit_and_check_solution(), Some(1));
+    }
+
+    #[test]
     fn lok1x4_jump_gap() {
         let mut board = Board::new("LO_K_ ").unwrap();
         board.blacken(0, 0);
@@ -395,6 +442,15 @@ mod tests {
         board.blacken(0, 3);
         board.blacken(0, 7);
         assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    fn lok_unsolvable_cant_execute() {
+        let mut board = Board::new("LOK").unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        assert_eq!(board.commit_and_check_solution(), Some(3));
     }
 
     #[test]
@@ -480,6 +536,27 @@ mod tests {
     }
 
     #[test]
+    fn tlak_cant_execute1() {
+        let mut board = Board::new("TLAK").unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        assert_eq!(board.commit_and_check_solution(), Some(4));
+    }
+
+    #[test]
+    fn tlak_cant_execute2() {
+        let mut board = Board::new("TLAK ").unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        board.blacken(0, 4);
+        assert_eq!(board.commit_and_check_solution(), Some(5));
+    }
+
+    #[test]
     fn tlak_wrong_k() {
         let mut board = Board::new("TLAZ  ").unwrap();
         board.blacken(0, 0);
@@ -501,5 +578,33 @@ mod tests {
         board.blacken(0, 4);
         board.blacken(0, 5);
         assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    fn ta_correct() {
+        let mut board = Board::new("TA\nQQ").unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(1, 0);
+        board.blacken(1, 1);
+        assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    fn ta_multiple_letters() {
+        let mut board = Board::new("TA\nQZ").unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(1, 0);
+        board.blacken(1, 1);
+        assert_eq!(board.commit_and_check_solution(), Some(3));
+    }
+
+    #[test]
+    fn ta_unsolvable_no_exec() {
+        let mut board = Board::new("TA__").unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        assert_eq!(board.commit_and_check_solution(), Some(2));
     }
 }
