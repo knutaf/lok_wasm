@@ -1,18 +1,53 @@
 import { memory } from "lok-wasm/lok_wasm_bg";
 import { Board, BoardCell } from "lok-wasm";
 
+window.addEventListener("hashchange", onHashChange);
 document.getElementById("check_solution").addEventListener("click", onClickCheckSolution);
 document.getElementById("generate_form").addEventListener("submit", onGenerateSubmit);
 
+var g_anchor = null;
 var g_board = null;
 
-function onGenerateSubmit(evt) {
-    g_board = Board.new(document.getElementById("puzzle_entry").value);
+// If the hash/anchor of the URL has changed, load the newly specified puzzle
+function onHashChange() {
+    const newAnchor = window.location.hash;
+    if (newAnchor != g_anchor) {
+        g_anchor = newAnchor;
+        const anchorStart = g_anchor.indexOf("#");
+
+        var encodedPuzzle = "";
+        if (anchorStart != -1) {
+            encodedPuzzle = g_anchor.substring(anchorStart + 1);
+        }
+
+        if (encodedPuzzle == "") {
+            encodedPuzzle = encodeURIComponent("LO_ K \nL_O K \nTLAK__");
+        }
+
+        document.getElementById("puzzle_entry").value = decodeURIComponent(encodedPuzzle);
+        setPuzzle();
+    }
+}
+
+function setPuzzle() {
+    const puzzle = document.getElementById("puzzle_entry").value;
+    g_board = Board.new(puzzle);
     renderBoard(g_board);
 
     const resultDisplay = document.getElementById("result_display");
     resultDisplay.className = null;
     resultDisplay.textContent = "Unsolved";
+
+    var newHash = "#" + encodeURIComponent(puzzle);
+    if (window.location.hash != newHash) {
+        console.log("setting hash to " + newHash);
+        window.location.hash = newHash;
+    }
+}
+
+function onGenerateSubmit(evt) {
+    setPuzzle();
+    return false;
 }
 
 function onCellClick(evt) {
@@ -63,4 +98,4 @@ function renderBoard(board) {
     boardDisplay.replaceChild(boardTable, boardDisplay.firstChild);
 }
 
-document.getElementById("generate_form").requestSubmit();
+onHashChange();
