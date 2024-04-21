@@ -9,6 +9,10 @@ var g_board = null;
 function onGenerateSubmit(evt) {
     g_board = Board.new(document.getElementById("puzzle_entry").value);
     renderBoard(g_board);
+
+    const resultDisplay = document.getElementById("result_display");
+    resultDisplay.className = null;
+    resultDisplay.textContent = "Unsolved";
 }
 
 function onCellClick(evt) {
