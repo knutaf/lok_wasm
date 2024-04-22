@@ -201,6 +201,10 @@ impl Board {
         true
     }
 
+    pub fn undo(&mut self) {
+        let _ = self.moves.pop();
+    }
+
     pub fn commit_and_check_solution(&self) -> Option<usize> {
         let mut simgrid = self.grid.clone();
         let mut state = BoardState::idle();

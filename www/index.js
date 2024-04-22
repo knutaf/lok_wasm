@@ -2,8 +2,10 @@ import { memory } from "lok-wasm/lok_wasm_bg";
 import { Board, BoardCell } from "lok-wasm";
 
 window.addEventListener("hashchange", onHashChange);
+window.addEventListener("keydown", onKeyDown);
 document.getElementById("check_solution").addEventListener("click", onClickCheckSolution);
 document.getElementById("generate_form").addEventListener("submit", onGenerateSubmit);
+document.getElementById("undo").addEventListener("click", onClickUndo);
 
 var g_anchor = null;
 var g_board = null;
@@ -26,6 +28,15 @@ function onHashChange() {
 
         document.getElementById("puzzle_entry").value = decodeURIComponent(encodedPuzzle);
         setPuzzle();
+    }
+}
+
+function onKeyDown(evt) {
+    switch (evt.key) {
+        case "z": {
+            onClickUndo();
+            break;
+        }
     }
 }
 
@@ -67,6 +78,11 @@ function onClickCheckSolution(evt) {
         resultDisplay.className = "result_fail";
         resultDisplay.textContent = "NAY";
     }
+}
+
+function onClickUndo(evt) {
+    g_board.undo();
+    renderBoard();
 }
 
 function renderBoard() {
