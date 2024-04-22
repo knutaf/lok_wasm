@@ -33,8 +33,19 @@ function onHashChange() {
 
 function onKeyDown(evt) {
     switch (evt.key) {
+        // Z to undo.
         case "z": {
             onClickUndo();
+            break;
+        }
+
+        // CTRL-Enter to set puzzle, when the puzzle text entry is in focus.
+        case "Enter": {
+            if (evt.ctrlKey) {
+                if (document.activeElement == document.getElementById("puzzle_entry")) {
+                    setPuzzle();
+                }
+            }
             break;
         }
     }
