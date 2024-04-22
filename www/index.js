@@ -32,7 +32,7 @@ function onHashChange() {
 function setPuzzle() {
     const puzzle = document.getElementById("puzzle_entry").value;
     g_board = Board.new(puzzle);
-    renderBoard(g_board);
+    renderBoard();
 
     const resultDisplay = document.getElementById("result_display");
     resultDisplay.className = null;
@@ -52,8 +52,9 @@ function onGenerateSubmit(evt) {
 
 function onCellClick(evt) {
     const cell = evt.target;
-    g_board.blacken(cell.boardRow, cell.boardCol);
-    cell.classList.add("blackened");
+    if (g_board.blacken(cell.boardRow, cell.boardCol)) {
+        renderBoard();
+    }
 }
 
 function onClickCheckSolution(evt) {
@@ -68,9 +69,9 @@ function onClickCheckSolution(evt) {
     }
 }
 
-function renderBoard(board) {
-    const width = board.width();
-    const height = board.height();
+function renderBoard() {
+    const width = g_board.width();
+    const height = g_board.height();
 
     const boardDisplay = document.getElementById("board_display");
 
@@ -78,7 +79,7 @@ function renderBoard(board) {
     for (var r = 0; r < height; r++) {
         const row = document.createElement("tr");
         for (var c = 0; c < width; c++) {
-            const boardCell = board.get(r, c);
+            const boardCell = g_board.get(r, c);
 
             const cell = document.createElement("td");
             cell.boardRow = r;

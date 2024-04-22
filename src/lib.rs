@@ -116,10 +116,15 @@ impl BoardState {
     }
 }
 
+struct BoardStep {
+    mv: Move,
+    grid: BoardGrid,
+}
+
 #[wasm_bindgen]
 pub struct Board {
     grid: BoardGrid,
-    moves: Vec<Move>,
+    moves: Vec<BoardStep>,
 }
 
 #[wasm_bindgen]
@@ -170,21 +175,36 @@ impl Board {
     }
 
     pub fn get(&self, row: usize, col: usize) -> BoardCell {
-        self.grid[&RC(row, col)].clone()
+        self.get_latest()[&RC(row, col)].clone()
     }
 
-    pub fn blacken(&mut self, row: usize, col: usize) {
+    pub fn blacken(&mut self, row: usize, col: usize) -> bool {
         // TODO Probably this should be properly error handled.
         assert!(row < self.grid.height());
         assert!(col < self.grid.width());
 
-        self.moves.push(Move::Blacken(RC(row, col)));
+        let target_rc = RC(row, col);
+        let latest_grid = self.get_latest();
+        if latest_grid[&target_rc].is_blackened() {
+            log!("{:?} is already blackened", target_rc);
+            return false;
+        }
+
+        let mut new_grid = latest_grid.clone();
+        new_grid[&target_rc].blacken();
+
+        self.moves.push(BoardStep {
+            mv: Move::Blacken(target_rc.clone()),
+            grid: new_grid,
+        });
+
+        true
     }
 
     pub fn commit_and_check_solution(&self) -> Option<usize> {
         let mut simgrid = self.grid.clone();
         let mut state = BoardState::idle();
-        for (mv_num, mv) in self.moves.iter().enumerate() {
+        for (mv_num, BoardStep { mv: mv, grid: _ }) in self.moves.iter().enumerate() {
             log!("{:2}: state {:?}, move {:?}", mv_num, state, mv);
 
             state = match mv {
@@ -354,6 +374,14 @@ impl Board {
 }
 
 impl Board {
+    fn get_latest(&self) -> &BoardGrid {
+        if let Some(step) = self.moves.last() {
+            &step.grid
+        } else {
+            &self.grid
+        }
+    }
+
     fn is_connected_for_keyword(grid: &BoardGrid, rc1: &RC, rc2: &RC) -> bool {
         // TODO this probably needs to change when I add conductors
         Self::is_adjacent(grid, rc1, rc2)
