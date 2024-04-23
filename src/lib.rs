@@ -25,6 +25,7 @@ const KNOWN_KEYWORDS: [&'static str; 3] = ["LOK", "TLAK", "TA"];
 struct BoardCell {
     letter: Option<char>,
     is_blackened: bool,
+    is_marked_for_path: bool,
 }
 
 type BoardGrid = Grid<BoardCell>;
@@ -37,6 +38,10 @@ impl BoardCell {
 
     pub fn is_blackened(&self) -> bool {
         self.is_blackened
+    }
+
+    pub fn is_marked_for_path(&self) -> bool {
+        self.is_marked_for_path
     }
 
     pub fn get_display(&self) -> char {
@@ -53,6 +58,7 @@ impl BoardCell {
         BoardCell {
             letter: None,
             is_blackened: false,
+            is_marked_for_path: false,
         }
     }
 
@@ -65,6 +71,7 @@ impl BoardCell {
                 _ => Some(letter.to_ascii_uppercase()),
             },
             is_blackened: false,
+            is_marked_for_path: false,
         }
     }
 
@@ -93,13 +100,20 @@ impl BoardCell {
     }
 
     fn blacken(&mut self) {
+        assert!(!self.is_blackened);
         self.is_blackened = true;
+    }
+
+    fn mark_path(&mut self) {
+        assert!(!self.is_marked_for_path);
+        self.is_marked_for_path = true;
     }
 }
 
 #[derive(Debug)]
 enum Move {
     Blacken(RC),
+    MarkPath(RC),
 }
 
 #[derive(Clone, Debug)]
@@ -179,7 +193,6 @@ impl Board {
     }
 
     pub fn blacken(&mut self, row: usize, col: usize) -> bool {
-        // TODO Probably this should be properly error handled.
         assert!(row < self.grid.height());
         assert!(col < self.grid.width());
 
@@ -195,6 +208,28 @@ impl Board {
 
         self.moves.push(BoardStep {
             mv: Move::Blacken(target_rc.clone()),
+            grid: new_grid,
+        });
+
+        true
+    }
+
+    pub fn mark_path(&mut self, row: usize, col: usize) -> bool {
+        assert!(row < self.grid.height());
+        assert!(col < self.grid.width());
+
+        let target_rc = RC(row, col);
+        let latest_grid = self.get_latest();
+        if latest_grid[&target_rc].is_marked_for_path() {
+            log!("{:?} is already path marked", target_rc);
+            return false;
+        }
+
+        let mut new_grid = latest_grid.clone();
+        new_grid[&target_rc].mark_path();
+
+        self.moves.push(BoardStep {
+            mv: Move::MarkPath(target_rc.clone()),
             grid: new_grid,
         });
 
@@ -351,6 +386,9 @@ impl Board {
                             }
                         }
                     }
+                }
+                Move::MarkPath(target_rc) => {
+                    panic!("not implemented");
                 }
             };
         }

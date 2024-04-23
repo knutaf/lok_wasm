@@ -72,10 +72,30 @@ function onGenerateSubmit(evt) {
     return false;
 }
 
+function getMode() {
+    if (document.getElementById("modeBlacken").checked) {
+        return "blacken";
+    } else if (document.getElementById("modeMarkPath").checked) {
+        return "markPath";
+    }
+}
+
 function onCellClick(evt) {
+    // TODO change action based on mode
     const cell = evt.target;
-    if (g_board.blacken(cell.boardRow, cell.boardCol)) {
-        renderBoard();
+    switch (getMode()) {
+        case "blacken": {
+            if (g_board.blacken(cell.boardRow, cell.boardCol)) {
+                renderBoard();
+            }
+            break;
+        }
+        case "markPath": {
+            if (g_board.mark_path(cell.boardRow, cell.boardCol)) {
+                renderBoard();
+            }
+            break;
+        }
     }
 }
 
@@ -119,6 +139,10 @@ function renderBoard() {
 
             if (boardCell.is_blackened()) {
                 cell.classList.add("blackened");
+            }
+
+            if (boardCell.is_marked_for_path()) {
+                cell.classList.add("pathmarked");
             }
 
             cell.textContent = boardCell.get_display();

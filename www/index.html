@@ -21,7 +21,7 @@
     }
 
     .normal_cell {
-        border: 1px solid black;
+        border: 2px solid black;
         cursor: pointer;
     }
 
@@ -30,7 +30,16 @@
         background-color: black;
     }
 
+    .pathmarked {
+        border: 2px dotted black;
+    }
+
+    .blackened.pathmarked {
+        border: 2px dotted white;
+    }
+
     #result_display {
+        margin: 0.5em;
         padding: 0.5em;
         border: 1px solid black;
     }
@@ -55,9 +64,17 @@ TLAK__</textarea>
     <hr />
     <div id="board_display"><table style="display: none"></table></div>
     <hr />
+    <p>
+    Mode:
+    <input type="radio" name="mode" id="modeBlacken" value="blacken" checked /><label for="modeBlacken">Blacken</label>
+    <input type="radio" name="mode" id="modeMarkPath" value="markPath" /><label for="modeMarkPath">Mark Path</label>
+    </p>
+
+    <p>
     <button id="undo">Undo</button>
     <button id="check_solution">Check!</button>
     <span id="result_display">Unsolved</span>
+    </p>
     <script src="./bootstrap.js"></script>
   </body>
 </html>
