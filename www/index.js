@@ -48,6 +48,21 @@ function onKeyDown(evt) {
             }
             break;
         }
+
+        // CTRL-m to switch modes.
+        case "m": {
+            if (evt.ctrlKey) {
+                const modeElements = document.getElementsByName("mode");
+                for (var i = 0; i < modeElements.length; i++)
+                {
+                    if (modeElements[i].checked) {
+                        modeElements[(i + 1) % modeElements.length].checked = true;
+                        break;
+                    }
+                }
+            }
+            break;
+        }
     }
 }
 
