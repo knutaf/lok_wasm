@@ -26,6 +26,7 @@ struct BoardCell {
     letter: Option<char>,
     is_blackened: bool,
     is_marked_for_path: bool,
+    mark_count: u32,
 }
 
 type BoardGrid = Grid<BoardCell>;
@@ -51,6 +52,10 @@ impl BoardCell {
             ' '
         }
     }
+
+    pub fn get_mark_count(&self) -> u32 {
+        self.mark_count
+    }
 }
 
 impl BoardCell {
@@ -59,6 +64,7 @@ impl BoardCell {
             letter: None,
             is_blackened: false,
             is_marked_for_path: false,
+            mark_count: 0,
         }
     }
 
@@ -72,6 +78,7 @@ impl BoardCell {
             },
             is_blackened: false,
             is_marked_for_path: false,
+            mark_count: 0,
         }
     }
 
@@ -100,13 +107,13 @@ impl BoardCell {
     }
 
     fn blacken(&mut self) {
-        assert!(!self.is_blackened);
         self.is_blackened = true;
+        self.mark_count += 1;
     }
 
     fn mark_path(&mut self) {
-        assert!(!self.is_marked_for_path);
         self.is_marked_for_path = true;
+        self.mark_count += 1;
     }
 }
 
@@ -192,48 +199,32 @@ impl Board {
         self.get_latest()[&RC(row, col)].clone()
     }
 
-    pub fn blacken(&mut self, row: usize, col: usize) -> bool {
+    pub fn blacken(&mut self, row: usize, col: usize) {
         assert!(row < self.grid.height());
         assert!(col < self.grid.width());
 
         let target_rc = RC(row, col);
-        let latest_grid = self.get_latest();
-        if latest_grid[&target_rc].is_blackened() {
-            log!("{:?} is already blackened", target_rc);
-            return false;
-        }
-
-        let mut new_grid = latest_grid.clone();
+        let mut new_grid = self.get_latest().clone();
         new_grid[&target_rc].blacken();
 
         self.moves.push(BoardStep {
             mv: Move::Blacken(target_rc.clone()),
             grid: new_grid,
         });
-
-        true
     }
 
-    pub fn mark_path(&mut self, row: usize, col: usize) -> bool {
+    pub fn mark_path(&mut self, row: usize, col: usize) {
         assert!(row < self.grid.height());
         assert!(col < self.grid.width());
 
         let target_rc = RC(row, col);
-        let latest_grid = self.get_latest();
-        if latest_grid[&target_rc].is_marked_for_path() {
-            log!("{:?} is already path marked", target_rc);
-            return false;
-        }
-
-        let mut new_grid = latest_grid.clone();
+        let mut new_grid = self.get_latest().clone();
         new_grid[&target_rc].mark_path();
 
         self.moves.push(BoardStep {
             mv: Move::MarkPath(target_rc.clone()),
             grid: new_grid,
         });
-
-        true
     }
 
     pub fn undo(&mut self) {

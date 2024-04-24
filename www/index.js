@@ -96,19 +96,16 @@ function getMode() {
 }
 
 function onCellClick(evt) {
-    // TODO change action based on mode
-    const cell = evt.target;
+    const cell = evt.currentTarget;
     switch (getMode()) {
         case "blacken": {
-            if (g_board.blacken(cell.boardRow, cell.boardCol)) {
-                renderBoard();
-            }
+            g_board.blacken(cell.boardRow, cell.boardCol);
+            renderBoard();
             break;
         }
         case "markPath": {
-            if (g_board.mark_path(cell.boardRow, cell.boardCol)) {
-                renderBoard();
-            }
+            g_board.mark_path(cell.boardRow, cell.boardCol);
+            renderBoard();
             break;
         }
     }
@@ -160,7 +157,20 @@ function renderBoard() {
                 cell.classList.add("pathmarked");
             }
 
-            cell.textContent = boardCell.get_display();
+            const letter = document.createElement("span");
+            letter.textContent = boardCell.get_display();
+
+            const markCountDisplay = document.createElement("sup");
+
+            const markCount = boardCell.get_mark_count();
+            if (markCount > 1) {
+                markCountDisplay.textContent = "" + markCount;
+            } else {
+                markCountDisplay.textContent = " ";
+            }
+
+            cell.appendChild(letter);
+            cell.appendChild(markCountDisplay);
             row.appendChild(cell);
         }
         boardTable.appendChild(row);
