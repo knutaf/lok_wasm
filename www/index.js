@@ -23,7 +23,7 @@ function onHashChange() {
         }
 
         if (encodedPuzzle == "") {
-            encodedPuzzle = encodeURIComponent("LO_ K \nL_O K \nTLAK__");
+            encodedPuzzle = encodeURIComponent("LO-_K-\nL_O_K_\nTLAK--");
         }
 
         document.getElementById("puzzle_entry").value = decodeURIComponent(encodedPuzzle);

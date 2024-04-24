@@ -46,11 +46,7 @@ impl BoardCell {
     }
 
     pub fn get_display(&self) -> char {
-        if let Some(ch) = self.letter {
-            ch
-        } else {
-            ' '
-        }
+        self.get_letter().unwrap_or(' ')
     }
 
     pub fn get_mark_count(&self) -> u32 {
@@ -73,7 +69,7 @@ impl BoardCell {
 
         BoardCell {
             letter: match letter {
-                '_' => None,
+                '-' => None,
                 _ => Some(letter.to_ascii_uppercase()),
             },
             is_blackened: false,
@@ -83,7 +79,7 @@ impl BoardCell {
     }
 
     fn blank() -> BoardCell {
-        BoardCell::raw(' ')
+        BoardCell::raw('_')
     }
 
     fn is_done(&self) -> bool {
@@ -105,7 +101,7 @@ impl BoardCell {
     fn get_letter(&self) -> Option<char> {
         match self.letter {
             None => None,
-            Some(' ') => None,
+            Some('_') => None,
             Some(ch) => Some(ch),
         }
     }
@@ -566,7 +562,7 @@ mod tests {
 
     #[test]
     fn lok1x4_correct() {
-        let mut board = Board::new("LOK ").unwrap();
+        let mut board = Board::new("LOK_").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(0, 2);
@@ -593,7 +589,7 @@ mod tests {
 
     #[test]
     fn lok1x4_jump_gap() {
-        let mut board = Board::new("LO_K_ ").unwrap();
+        let mut board = Board::new("LO-K-_").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(0, 3);
@@ -603,7 +599,7 @@ mod tests {
 
     #[test]
     fn lok_correct_jump_blackened() {
-        let mut board = Board::new("LO KLOK ").unwrap();
+        let mut board = Board::new("LO_KLOK_").unwrap();
         board.blacken(0, 4);
         board.blacken(0, 5);
         board.blacken(0, 6);
@@ -627,7 +623,7 @@ mod tests {
 
     #[test]
     fn lok1x5_unsolvable_extra_space() {
-        let mut board = Board::new("LOK  ").unwrap();
+        let mut board = Board::new("LOK__").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(0, 2);
@@ -637,7 +633,7 @@ mod tests {
 
     #[test]
     fn lok1x5_unsolvable_out_of_order() {
-        let mut board = Board::new("LKO ").unwrap();
+        let mut board = Board::new("LKO_").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 2);
         board.blacken(0, 1);
@@ -647,7 +643,7 @@ mod tests {
 
     #[test]
     fn lok1x4_out_of_order_middle() {
-        let mut board = Board::new("LOK ").unwrap();
+        let mut board = Board::new("LOK_").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 2);
         board.blacken(0, 1);
@@ -657,7 +653,7 @@ mod tests {
 
     #[test]
     fn lok1x4_out_of_order_backwards() {
-        let mut board = Board::new("LOK ").unwrap();
+        let mut board = Board::new("LOK_").unwrap();
         board.blacken(0, 2);
         board.blacken(0, 1);
         board.blacken(0, 0);
@@ -668,8 +664,8 @@ mod tests {
     #[test]
     fn lok2x4_correct() {
         let mut board = Board::new(
-            "LOK \n\
-             LOK ",
+            "LOK_\n\
+             LOK_",
         )
         .unwrap();
         board.blacken(0, 0);
@@ -686,8 +682,8 @@ mod tests {
     #[test]
     fn lok2x4_illegal_diagonal() {
         let mut board = Board::new(
-            "LOK \n\
-             LOK ",
+            "LOK_\n\
+             LOK_",
         )
         .unwrap();
         board.blacken(0, 0);
@@ -705,7 +701,7 @@ mod tests {
     fn lok_illegal_turn() {
         let mut board = Board::new(
             "OL\n\
-             K ",
+             K_",
         )
         .unwrap();
 
@@ -719,7 +715,7 @@ mod tests {
 
     #[test]
     fn tlak_correct() {
-        let mut board = Board::new("TLAK  ").unwrap();
+        let mut board = Board::new("TLAK__").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(0, 2);
@@ -741,7 +737,7 @@ mod tests {
 
     #[test]
     fn tlak_cant_execute2() {
-        let mut board = Board::new("TLAK ").unwrap();
+        let mut board = Board::new("TLAK_").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(0, 2);
@@ -752,7 +748,7 @@ mod tests {
 
     #[test]
     fn tlak_wrong_k() {
-        let mut board = Board::new("TLAZ  ").unwrap();
+        let mut board = Board::new("TLAZ__").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(0, 2);
@@ -804,7 +800,7 @@ mod tests {
 
     #[test]
     fn ta_unsolvable_no_exec() {
-        let mut board = Board::new("TA__").unwrap();
+        let mut board = Board::new("TA--").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
         assert_eq!(board.commit_and_check_solution(), Some(2));
@@ -815,10 +811,10 @@ mod tests {
     fn x_correct() {
         let mut board = Board::new(
             "TXLX\n\
-             _K__\n\
-             _XAX\n\
-             ____\n\
-             TAX ",
+             -K--\n\
+             -XAX\n\
+             ----\n\
+             TAX_",
         )
         .unwrap();
 
@@ -867,8 +863,8 @@ mod tests {
     fn x_loop() {
         let mut board = Board::new(
             "TXX\n\
-             _XX\n\
-             _AX",
+             -XX\n\
+             -AX",
         )
         .unwrap();
 
@@ -904,9 +900,9 @@ mod tests {
     #[ignore = "mark_path not fully implemented yet"]
     fn x_incorrect_reversal() {
         let mut board = Board::new(
-            " _K\n\
+            "_-K\n\
              LOX\n\
-             __X",
+             --X",
         )
         .unwrap();
 
@@ -926,7 +922,7 @@ mod tests {
 
     #[test]
     fn tlak_x_not_adjacent() {
-        let mut board = Board::new("TLAK X LOK").unwrap();
+        let mut board = Board::new("TLAK_X_LOK").unwrap();
 
         // TLAK
         board.blacken(0, 0);
