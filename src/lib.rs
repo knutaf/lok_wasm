@@ -471,6 +471,7 @@ impl Board {
 }
 
 #[cfg(test)]
+#[rustfmt::skip] // board declarations should be formatted as-is.
 mod tests {
     use super::*;
 
@@ -578,7 +579,11 @@ mod tests {
     #[test]
     fn lok2x4_correct() {
         // TODO find a prettier way to write these boards
-        let mut board = Board::new("LOK \nLOK ").unwrap();
+        let mut board = Board::new(
+            "LOK \n\
+             LOK ",
+        )
+        .unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(0, 2);
@@ -593,7 +598,11 @@ mod tests {
     #[test]
     fn lok2x4_illegal_diagonal() {
         // TODO find a prettier way to write these boards
-        let mut board = Board::new("LOK \nLOK ").unwrap();
+        let mut board = Board::new(
+            "LOK \n\
+             LOK ",
+        )
+        .unwrap();
         board.blacken(0, 0);
         board.blacken(1, 1);
         board.blacken(1, 2);
@@ -664,7 +673,11 @@ mod tests {
 
     #[test]
     fn ta_correct() {
-        let mut board = Board::new("TA\nQQ").unwrap();
+        let mut board = Board::new(
+            "TA\n\
+             QQ",
+        )
+        .unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(1, 0);
@@ -674,7 +687,11 @@ mod tests {
 
     #[test]
     fn ta_multiple_letters() {
-        let mut board = Board::new("TA\nQZ").unwrap();
+        let mut board = Board::new(
+            "TA\n\
+             QZ",
+        )
+        .unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(1, 0);
@@ -688,5 +705,43 @@ mod tests {
         board.blacken(0, 0);
         board.blacken(0, 1);
         assert_eq!(board.commit_and_check_solution(), Some(2));
+    }
+
+    #[test]
+    #[ignore = "mark_path not fully implemented yet"]
+    fn x_correct() {
+        let mut board = Board::new(
+            "TXLX\n\
+             _K__\n\
+             _XAX\n\
+             ____\n\
+             TAX ",
+        )
+        .unwrap();
+        // TLAK
+        board.blacken(0, 0);
+        board.mark_path(0, 1);
+        board.blacken(0, 2);
+        board.mark_path(0, 3);
+        board.mark_path(2, 3);
+        board.blacken(2, 2);
+        board.mark_path(2, 1);
+        board.blacken(1, 1);
+
+        // Exec TLAK
+        board.blacken(3, 2);
+        board.blacken(3, 3);
+
+        // TA
+        board.blacken(3, 0);
+        board.blacken(3, 1);
+
+        // Exec TA
+        board.blacken(0, 1);
+        board.blacken(0, 3);
+        board.blacken(2, 1);
+        board.blacken(2, 3);
+
+        assert_eq!(board.commit_and_check_solution(), None);
     }
 }
