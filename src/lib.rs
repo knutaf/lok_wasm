@@ -121,15 +121,24 @@ impl BoardCell {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum Move {
     Blacken(RC),
     MarkPath(RC),
 }
 
+impl Move {
+    fn get_rc(&self) -> &RC {
+        match &self {
+            Move::Blacken(rc) => rc,
+            Move::MarkPath(rc) => rc,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 enum BoardState {
-    GatheringKeyword(String, Vec<RC>),
+    GatheringKeyword(String, Vec<Move>),
     ExecutingLOK,
     ExecutingTLAK(Vec<RC>),
     ExecutingTA(Option<char>),
@@ -155,12 +164,11 @@ pub struct Board {
 #[wasm_bindgen]
 impl Board {
     pub fn new(contents: &str) -> Option<Board> {
-        log!("puzzle: {}", contents);
+        log!("puzzle:\n{}", contents);
 
         let mut rows = 0;
         let mut cols = 0;
         for line in contents.lines() {
-            log!("row {}: {}", rows, line);
             if cols == 0 {
                 cols = line.len();
             }
@@ -251,29 +259,11 @@ impl Board {
                     }
 
                     match state {
-                        BoardState::GatheringKeyword(keyword, keyword_rcs) => {
-                            // If this is not the first letter in this keyword, check to make sure the new one is
-                            // connected to the most recent letter that was accepted.
-                            if let Some(last_rc) = keyword_rcs.last() {
-                                let rc0_opt = if keyword_rcs.len() >= 2 {
-                                    keyword_rcs.get(keyword_rcs.len() - 2)
-                                } else {
-                                    None
-                                };
-
-                                if !Board::is_connected_for_keyword(
-                                    &simgrid,
-                                    rc0_opt,
-                                    keyword_rcs.last().unwrap(),
-                                    target_rc,
-                                ) {
-                                    log!(
-                                        "{:?} not connected to {:?} for keyword",
-                                        last_rc,
-                                        target_rc
-                                    );
-                                    return Some(mv_num);
-                                }
+                        BoardState::GatheringKeyword(keyword, keyword_moves) => {
+                            if !Board::is_connected_for_keyword(&simgrid, &keyword_moves, target_rc)
+                            {
+                                log!("{:?} not connected to previous keyword move", target_rc);
+                                return Some(mv_num);
                             }
 
                             // Keywords consist of only letters.
@@ -292,8 +282,8 @@ impl Board {
                                 }
 
                                 // So far this is a possible keyword, so accept the RC of the latest letter.
-                                let mut new_keyword_rcs = keyword_rcs.clone();
-                                new_keyword_rcs.push(target_rc.clone());
+                                let mut new_keyword_moves = keyword_moves.clone();
+                                new_keyword_moves.push(mv.clone());
 
                                 // If the keyword so far matches a known keyword, then accept it and transition to the
                                 // executing state. Otherwise, continue gathering.
@@ -302,8 +292,11 @@ impl Board {
                                     .find(|known_keyword| new_keyword == **known_keyword)
                                 {
                                     // Have now accumulated a whole keyword. Black it out.
-                                    for rc in new_keyword_rcs.iter() {
-                                        simgrid[rc].blacken();
+                                    for mv in new_keyword_moves.iter() {
+                                        if let Move::Blacken(rc) = mv {
+                                            assert!(!simgrid[rc].is_blackened());
+                                            simgrid[rc].blacken();
+                                        }
                                     }
 
                                     match *known_keyword {
@@ -315,7 +308,7 @@ impl Board {
                                         }
                                     }
                                 } else {
-                                    BoardState::GatheringKeyword(new_keyword, new_keyword_rcs)
+                                    BoardState::GatheringKeyword(new_keyword, new_keyword_moves)
                                 }
                             } else {
                                 log!("Not a letter: {}", target.get_raw());
@@ -323,6 +316,7 @@ impl Board {
                             }
                         }
                         BoardState::ExecutingLOK => {
+                            assert!(!simgrid[target_rc].is_blackened());
                             simgrid[target_rc].blacken();
                             BoardState::idle()
                         }
@@ -339,6 +333,7 @@ impl Board {
                                 }
                             }
 
+                            assert!(!simgrid[target_rc].is_blackened());
                             simgrid[target_rc].blacken();
 
                             if exec_rcs.len() == 1 {
@@ -364,16 +359,23 @@ impl Board {
                                     log!("TA choosing letter {}", letter);
                                 }
 
+                                assert!(!simgrid[target_rc].is_blackened());
                                 simgrid[target_rc].blacken();
 
                                 // If there are any more of this chosen letter on the board, then the state is still
                                 // waiting for those to be blackened out. Otherwise, the TA is done.
                                 let mut has_completed_all_letters = true;
                                 for (rc, cell) in simgrid.enumerate_row_col() {
-                                    if !cell.is_blackened() && cell.get_raw() == letter {
-                                        log!("{:?} is still {}", rc, letter);
-                                        has_completed_all_letters = false;
-                                        break;
+                                    if cell.is_blackened() {
+                                        continue;
+                                    }
+
+                                    if let Some(cell_letter) = cell.get_letter() {
+                                        if cell_letter == letter {
+                                            log!("{:?} is still {}", rc, letter);
+                                            has_completed_all_letters = false;
+                                            break;
+                                        }
                                     }
                                 }
 
@@ -390,7 +392,24 @@ impl Board {
                     }
                 }
                 Move::MarkPath(target_rc) => {
-                    panic!("not implemented");
+                    match state {
+                        BoardState::GatheringKeyword(keyword, keyword_moves) => {
+                            if !Board::is_connected_for_keyword(&simgrid, &keyword_moves, target_rc)
+                            {
+                                log!("{:?} not connected to previous keyword move", target_rc);
+                                return Some(mv_num);
+                            }
+
+                            let mut new_keyword_moves = keyword_moves.clone();
+                            new_keyword_moves.push(mv.clone());
+                            BoardState::GatheringKeyword(keyword.clone(), new_keyword_moves)
+                        }
+
+                        // In any other state, this is a no-op and can be ignored.
+                        BoardState::ExecutingLOK
+                        | BoardState::ExecutingTLAK(_)
+                        | BoardState::ExecutingTA(_) => state,
+                    }
                 }
             };
         }
@@ -473,34 +492,60 @@ impl Board {
                 return false;
             }
         }
-
-        true
     }
 
     fn is_connected_for_keyword(
         grid: &BoardGrid,
-        rc0_opt: Option<&RC>,
-        rc1: &RC,
-        rc2: &RC,
+        moves: &Vec<Move>,
+        rc2: &RC, // other parts considered will be rc1 (prior move) and rc0 (2 prior moves)
     ) -> bool {
+        // If this is the first move, then it is always accepted.
+        if moves.len() == 0 {
+            return true;
+        }
+
+        let rc1 = moves.last().unwrap().get_rc();
+
         if rc1 == rc2 {
             return false;
         }
 
-        let (row_walk_inc, col_walk_inc) =
-            // If a previous RC, rc0, was specified then grab the direction moved from rc0 to rc1 and use that as the
-            // same direction moved from rc1 to rc2.
-            if let Some(rc0) = rc0_opt {
-                assert!(rc1.0 == rc0.0 || rc1.1 == rc0.1);
-                (rc1.0.cmp(&rc0.0) as i8 as isize, rc1.1.cmp(&rc0.1) as i8 as isize)
-            } else {
-                // Must be either vertically or horizontally aligned
-                if rc2.0 != rc1.0 && rc2.1 != rc1.1 {
+        // Must be either vertically or horizontally aligned
+        if rc2.0 != rc1.0 && rc2.1 != rc1.1 {
+            return false;
+        }
+
+        // By default, just walk between the previous step and the current step.
+        let mut row_walk_inc = rc2.0.cmp(&rc1.0) as i8 as isize;
+        let mut col_walk_inc = rc2.1.cmp(&rc1.1) as i8 as isize;
+
+        // If an earlier RC, rc0, was present, it may need to be factored in to the direction of movement.
+        if moves.len() >= 2 {
+            let rc0 = moves.get(moves.len() - 2).unwrap().get_rc();
+            assert!(rc1.0 == rc0.0 || rc1.1 == rc0.1);
+
+            if grid[rc1].is_conductor() {
+                let (backtracking_row_walk_inc, backtracking_col_walk_inc) = (
+                    rc0.0.cmp(&rc1.0) as i8 as isize,
+                    rc0.1.cmp(&rc1.1) as i8 as isize,
+                );
+
+                if backtracking_row_walk_inc == row_walk_inc
+                    && backtracking_col_walk_inc == col_walk_inc
+                {
+                    log!("Cannot backtrack through conductor {:?}", rc1);
                     return false;
                 }
-
-                (rc2.0.cmp(&rc1.0) as i8 as isize, rc2.1.cmp(&rc1.1) as i8 as isize)
-            };
+            } else {
+                // If the previous RC was a regular space and not a conductor, then the direction from rc0 to rc1 must
+                // be followed to get to rc2.
+                row_walk_inc = rc1.0.cmp(&rc0.0) as i8 as isize;
+                col_walk_inc = rc1.1.cmp(&rc0.1) as i8 as isize;
+            }
+        } else {
+            // Cannot have a conductor accepted as the first move.
+            assert!(!grid[rc1].is_conductor());
+        }
 
         assert!(row_walk_inc == 0 || col_walk_inc == 0);
 
@@ -535,8 +580,15 @@ impl Board {
                 current_rc.1.checked_add_signed(col_walk_inc).unwrap(),
             );
 
-            assert!(current_rc.0 < grid.height());
-            assert!(current_rc.1 < grid.width());
+            if current_rc.0 >= grid.height() {
+                log!("Traversed beyond row bounds from {:?}", current_rc);
+                return false;
+            }
+
+            if current_rc.1 >= grid.width() {
+                log!("Traversed beyond col bounds from {:?}", current_rc);
+                return false;
+            }
 
             if current_rc == *rc2 {
                 return true;
@@ -807,7 +859,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "mark_path not fully implemented yet"]
     fn x_correct() {
         let mut board = Board::new(
             "TXLX\n\
@@ -829,12 +880,12 @@ mod tests {
         board.blacken(1, 1);
 
         // Exec TLAK
-        board.blacken(3, 2);
-        board.blacken(3, 3);
+        board.blacken(4, 2);
+        board.blacken(4, 3);
 
         // TA
-        board.blacken(3, 0);
-        board.blacken(3, 1);
+        board.blacken(4, 0);
+        board.blacken(4, 1);
 
         // Exec TA
         board.blacken(0, 1);
@@ -859,7 +910,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "mark_path not fully implemented yet"]
     fn x_loop() {
         let mut board = Board::new(
             "TXX\n\
@@ -897,7 +947,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "mark_path not fully implemented yet"]
     fn x_incorrect_reversal() {
         let mut board = Board::new(
             "_-K\n\
