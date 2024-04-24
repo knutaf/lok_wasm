@@ -90,8 +90,16 @@ impl BoardCell {
         self.letter.is_none() || self.is_blackened()
     }
 
-    fn is_traversible(&self) -> bool {
+    fn is_traversible_for_adjacency(&self) -> bool {
         self.is_done()
+    }
+
+    fn is_traversible_for_keyword(&self) -> bool {
+        self.is_traversible_for_adjacency() || self.is_conductor()
+    }
+
+    fn is_conductor(&self) -> bool {
+        !self.is_blackened() && self.get_raw() == 'X'
     }
 
     fn get_letter(&self) -> Option<char> {
@@ -251,8 +259,15 @@ impl Board {
                             // If this is not the first letter in this keyword, check to make sure the new one is
                             // connected to the most recent letter that was accepted.
                             if let Some(last_rc) = keyword_rcs.last() {
+                                let rc0_opt = if keyword_rcs.len() >= 2 {
+                                    keyword_rcs.get(keyword_rcs.len() - 2)
+                                } else {
+                                    None
+                                };
+
                                 if !Board::is_connected_for_keyword(
                                     &simgrid,
+                                    rc0_opt,
                                     keyword_rcs.last().unwrap(),
                                     target_rc,
                                 ) {
@@ -415,13 +430,10 @@ impl Board {
         }
     }
 
-    fn is_connected_for_keyword(grid: &BoardGrid, rc1: &RC, rc2: &RC) -> bool {
-        // TODO this probably needs to change when I add conductors
-        Self::is_adjacent(grid, rc1, rc2)
-    }
-
     fn is_adjacent(grid: &BoardGrid, rc1: &RC, rc2: &RC) -> bool {
-        assert_ne!(rc1, rc2);
+        if rc1 == rc2 {
+            return false;
+        }
 
         // Must be either vertically or horizontally aligned
         if rc1.0 != rc2.0 && rc1.1 != rc2.1 {
@@ -457,9 +469,87 @@ impl Board {
             }
 
             let current = grid[&current_rc];
-            if !current.is_traversible() {
+            if !current.is_traversible_for_adjacency() {
                 log!(
-                    "Not connected: {:?} is not available for traversal",
+                    "Not connected: {:?} is not available for adjacency traversal",
+                    current_rc
+                );
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn is_connected_for_keyword(
+        grid: &BoardGrid,
+        rc0_opt: Option<&RC>,
+        rc1: &RC,
+        rc2: &RC,
+    ) -> bool {
+        if rc1 == rc2 {
+            return false;
+        }
+
+        let (row_walk_inc, col_walk_inc) =
+            // If a previous RC, rc0, was specified then grab the direction moved from rc0 to rc1 and use that as the
+            // same direction moved from rc1 to rc2.
+            if let Some(rc0) = rc0_opt {
+                assert!(rc1.0 == rc0.0 || rc1.1 == rc0.1);
+                (rc1.0.cmp(&rc0.0) as i8 as isize, rc1.1.cmp(&rc0.1) as i8 as isize)
+            } else {
+                // Must be either vertically or horizontally aligned
+                if rc2.0 != rc1.0 && rc2.1 != rc1.1 {
+                    return false;
+                }
+
+                (rc2.0.cmp(&rc1.0) as i8 as isize, rc2.1.cmp(&rc1.1) as i8 as isize)
+            };
+
+        assert!(row_walk_inc == 0 || col_walk_inc == 0);
+
+        log!(
+            "Walk from {:?} to {:?}, using ({}, {})",
+            rc1,
+            rc2,
+            row_walk_inc,
+            col_walk_inc
+        );
+
+        let mut current_rc = rc1.clone();
+        loop {
+            if row_walk_inc < 0 && current_rc.0 == 0 {
+                log!(
+                    "Traversed out of bounds to negative row from {:?}",
+                    current_rc
+                );
+                return false;
+            }
+
+            if col_walk_inc < 0 && current_rc.1 == 0 {
+                log!(
+                    "Traversed out of bounds to negative col from {:?}",
+                    current_rc
+                );
+                return false;
+            }
+
+            current_rc = RC(
+                current_rc.0.checked_add_signed(row_walk_inc).unwrap(),
+                current_rc.1.checked_add_signed(col_walk_inc).unwrap(),
+            );
+
+            assert!(current_rc.0 < grid.height());
+            assert!(current_rc.1 < grid.width());
+
+            if current_rc == *rc2 {
+                return true;
+            }
+
+            let current = grid[&current_rc];
+            if !current.is_traversible_for_keyword() {
+                log!(
+                    "Not connected: {:?} is not available for keyword traversal",
                     current_rc
                 );
                 return false;
@@ -471,7 +561,6 @@ impl Board {
 }
 
 #[cfg(test)]
-#[rustfmt::skip] // board declarations should be formatted as-is.
 mod tests {
     use super::*;
 
@@ -578,7 +667,6 @@ mod tests {
 
     #[test]
     fn lok2x4_correct() {
-        // TODO find a prettier way to write these boards
         let mut board = Board::new(
             "LOK \n\
              LOK ",
@@ -597,7 +685,6 @@ mod tests {
 
     #[test]
     fn lok2x4_illegal_diagonal() {
-        // TODO find a prettier way to write these boards
         let mut board = Board::new(
             "LOK \n\
              LOK ",
@@ -612,6 +699,22 @@ mod tests {
         board.blacken(0, 2);
         board.blacken(0, 3);
         assert_eq!(board.commit_and_check_solution(), Some(1));
+    }
+
+    #[test]
+    fn lok_illegal_turn() {
+        let mut board = Board::new(
+            "OL\n\
+             K ",
+        )
+        .unwrap();
+
+        board.blacken(0, 1);
+        board.blacken(0, 0);
+        board.blacken(1, 0);
+        board.blacken(1, 1);
+
+        assert_eq!(board.commit_and_check_solution(), Some(2));
     }
 
     #[test]
@@ -718,6 +821,7 @@ mod tests {
              TAX ",
         )
         .unwrap();
+
         // TLAK
         board.blacken(0, 0);
         board.mark_path(0, 1);
@@ -743,5 +847,105 @@ mod tests {
         board.blacken(2, 3);
 
         assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    fn x_implicit_move_through() {
+        let mut board = Board::new("TXA").unwrap();
+
+        // TA
+        board.blacken(0, 0);
+        board.blacken(0, 2);
+
+        // Exec TA
+        board.blacken(0, 1);
+
+        assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    #[ignore = "mark_path not fully implemented yet"]
+    fn x_loop() {
+        let mut board = Board::new(
+            "TXX\n\
+             _XX\n\
+             _AX",
+        )
+        .unwrap();
+
+        // T
+        board.blacken(0, 0);
+
+        // Loop
+        board.mark_path(0, 2);
+        board.mark_path(1, 2);
+        board.mark_path(1, 1);
+        board.mark_path(0, 1);
+        board.mark_path(0, 2);
+        board.mark_path(1, 2);
+        board.mark_path(1, 1);
+        board.mark_path(0, 1);
+        board.mark_path(0, 2);
+
+        // A
+        board.mark_path(2, 2);
+        board.blacken(2, 1);
+
+        // Exec TA
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(1, 1);
+        board.blacken(1, 2);
+        board.blacken(2, 2);
+
+        assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    #[ignore = "mark_path not fully implemented yet"]
+    fn x_incorrect_reversal() {
+        let mut board = Board::new(
+            " _K\n\
+             LOX\n\
+             __X",
+        )
+        .unwrap();
+
+        board.blacken(1, 0);
+        board.blacken(1, 1);
+        board.mark_path(1, 2);
+        board.mark_path(2, 2);
+
+        // Reversal not allowed
+        board.blacken(0, 2);
+
+        // Exec LOK
+        board.blacken(0, 0);
+
+        assert_eq!(board.commit_and_check_solution(), Some(4));
+    }
+
+    #[test]
+    fn tlak_x_not_adjacent() {
+        let mut board = Board::new("TLAK X LOK").unwrap();
+
+        // TLAK
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+
+        // Exec TLAK, but these aren't adjacent because conductor
+        board.blacken(0, 4);
+        board.blacken(0, 6);
+
+        // LOK
+        board.blacken(0, 7);
+        board.blacken(0, 8);
+        board.blacken(0, 9);
+
+        // Exec LOK
+        board.blacken(0, 5);
+
+        assert_eq!(board.commit_and_check_solution(), Some(5));
     }
 }
