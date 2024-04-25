@@ -18,7 +18,7 @@ macro_rules! log {
     }
 }
 
-const KNOWN_KEYWORDS: [&'static str; 3] = ["LOK", "TLAK", "TA"];
+const KNOWN_KEYWORDS: [&'static str; 4] = ["LOK", "TLAK", "TA", "BE"];
 
 #[wasm_bindgen]
 #[derive(Copy, Clone, PartialEq)]
@@ -80,6 +80,13 @@ impl BoardCell {
 
     fn blank() -> BoardCell {
         BoardCell::raw('_')
+    }
+
+    fn is_blank(&self) -> bool {
+        match self.letter {
+            Some('_') => true,
+            _ => false,
+        }
     }
 
     fn is_done(&self) -> bool {
@@ -154,6 +161,7 @@ enum BoardState {
     ExecutingLOK,
     ExecutingTLAK(Vec<RC>),
     ExecutingTA(Option<char>),
+    ExecutingBE,
 }
 
 impl BoardState {
@@ -277,15 +285,14 @@ impl Board {
         for (mv_num, BoardStep { mv: mv, grid: _ }) in self.moves.iter().enumerate() {
             log!("{:2}: state {:?}, move {:?}", mv_num, state, mv);
 
+            let target = simgrid[mv.get_rc()].clone();
+            if target.is_blackened() {
+                log!("{:?} already blackened", mv.get_rc());
+                return Some(mv_num);
+            }
+
             state = match mv {
                 Move::Blacken(target_rc) => {
-                    let target = simgrid[target_rc].clone();
-
-                    if target.is_blackened() {
-                        log!("{:?} already blackened", target_rc);
-                        return Some(mv_num);
-                    }
-
                     match state {
                         BoardState::GatheringKeyword(keyword, keyword_moves) => {
                             if !Board::is_connected_for_keyword(&simgrid, &keyword_moves, target_rc)
@@ -331,6 +338,7 @@ impl Board {
                                         "LOK" => BoardState::ExecutingLOK,
                                         "TLAK" => BoardState::ExecutingTLAK(vec![]),
                                         "TA" => BoardState::ExecutingTA(None),
+                                        "BE" => BoardState::ExecutingBE,
                                         _ => {
                                             panic!("Impossible unknown keyword {}", *known_keyword)
                                         }
@@ -344,7 +352,7 @@ impl Board {
                             }
                         }
                         BoardState::ExecutingLOK => {
-                            assert!(!simgrid[target_rc].is_blackened());
+                            assert!(!target.is_blackened());
                             simgrid[target_rc].blacken();
                             BoardState::idle()
                         }
@@ -361,7 +369,7 @@ impl Board {
                                 }
                             }
 
-                            assert!(!simgrid[target_rc].is_blackened());
+                            assert!(!target.is_blackened());
                             simgrid[target_rc].blacken();
 
                             if exec_rcs.len() == 1 {
@@ -387,7 +395,7 @@ impl Board {
                                     log!("TA choosing letter {}", letter);
                                 }
 
-                                assert!(!simgrid[target_rc].is_blackened());
+                                assert!(!target.is_blackened());
                                 simgrid[target_rc].blacken();
 
                                 // If there are any more of this chosen letter on the board, then the state is still
@@ -417,31 +425,56 @@ impl Board {
                                 return Some(mv_num);
                             }
                         }
+                        BoardState::ExecutingBE => {
+                            log!("Cannot blacken while executing BE");
+                            return Some(mv_num);
+                        }
                     }
                 }
-                Move::MarkPath(target_rc) => {
-                    match state {
-                        BoardState::GatheringKeyword(keyword, keyword_moves) => {
-                            if !Board::is_connected_for_keyword(&simgrid, &keyword_moves, target_rc)
-                            {
-                                log!("{:?} not connected to previous keyword move", target_rc);
-                                return Some(mv_num);
-                            }
-
-                            let mut new_keyword_moves = keyword_moves.clone();
-                            new_keyword_moves.push(mv.clone());
-                            BoardState::GatheringKeyword(keyword.clone(), new_keyword_moves)
+                Move::MarkPath(target_rc) => match state {
+                    BoardState::GatheringKeyword(keyword, keyword_moves) => {
+                        if !Board::is_connected_for_keyword(&simgrid, &keyword_moves, target_rc) {
+                            log!("{:?} not connected to previous keyword move", target_rc);
+                            return Some(mv_num);
                         }
 
-                        // In any other state, this is a no-op and can be ignored.
-                        BoardState::ExecutingLOK
-                        | BoardState::ExecutingTLAK(_)
-                        | BoardState::ExecutingTA(_) => state,
+                        let mut new_keyword_moves = keyword_moves.clone();
+                        new_keyword_moves.push(mv.clone());
+                        BoardState::GatheringKeyword(keyword.clone(), new_keyword_moves)
                     }
-                }
-                Move::ChangeLetter(target_rc, letter) => {
-                    panic!("not implemented")
-                }
+                    BoardState::ExecutingLOK
+                    | BoardState::ExecutingTLAK(_)
+                    | BoardState::ExecutingTA(_)
+                    | BoardState::ExecutingBE => {
+                        log!("Cannot mark path while executing a keyword");
+                        return Some(mv_num);
+                    }
+                },
+                Move::ChangeLetter(target_rc, letter) => match state {
+                    BoardState::GatheringKeyword(_, _)
+                    | BoardState::ExecutingLOK
+                    | BoardState::ExecutingTLAK(_)
+                    | BoardState::ExecutingTA(_) => {
+                        log!("Not allowed to change letter in state {:?}", state);
+                        return Some(mv_num);
+                    }
+                    BoardState::ExecutingBE => {
+                        if !target.is_blank() {
+                            log!(
+                                "Not allowed to change letter in non-blank cell: {:?}",
+                                target.get_letter()
+                            );
+                            return Some(mv_num);
+                        }
+
+                        if !simgrid[target_rc].change_letter(*letter) {
+                            log!("Not allowed to change letter to '{}'", letter);
+                            return Some(mv_num);
+                        }
+
+                        BoardState::idle()
+                    }
+                },
             };
         }
 
@@ -634,8 +667,6 @@ impl Board {
                 return false;
             }
         }
-
-        true
     }
 }
 
@@ -797,6 +828,46 @@ mod tests {
     }
 
     #[test]
+    fn lok_cannot_mark_path() {
+        let mut board = Board::new("LOK_").unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.mark_path(0, 3);
+        board.blacken(0, 3);
+        assert_eq!(board.commit_and_check_solution(), Some(3));
+    }
+
+    #[test]
+    fn lok_cannot_change_letter() {
+        let mut board = Board::new("LOK_").unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.change_letter(0, 3, 'Q');
+        board.blacken(0, 3);
+        assert_eq!(board.commit_and_check_solution(), Some(3));
+    }
+
+    #[test]
+    #[ignore = "Not yet implemented"]
+    fn reject_explicit_spurious_adjacency() {
+        let mut board = Board::new("LOKL_OK_").unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 4);
+
+        // Mark path is unnecessary and disallowed.
+        board.blacken(0, 3);
+        board.mark_path(0, 4);
+        board.blacken(0, 5);
+        board.blacken(0, 6);
+        board.blacken(0, 7);
+        assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
     fn tlak_correct() {
         let mut board = Board::new("TLAK__").unwrap();
         board.blacken(0, 0);
@@ -854,16 +925,42 @@ mod tests {
     }
 
     #[test]
+    fn tlak_cannot_mark_path() {
+        let mut board = Board::new("TLAK__").unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        board.blacken(0, 4);
+        board.mark_path(0, 5);
+        board.blacken(0, 5);
+        assert_eq!(board.commit_and_check_solution(), Some(5));
+    }
+
+    #[test]
+    fn tlak_cannot_change_leter() {
+        let mut board = Board::new("TLAK__").unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        board.blacken(0, 4);
+        board.change_letter(0, 5, 'Q');
+        board.blacken(0, 5);
+        assert_eq!(board.commit_and_check_solution(), Some(5));
+    }
+
+    #[test]
     fn ta_correct() {
         let mut board = Board::new(
-            "TA\n\
-             QQ",
+            "TA-\n\
+             Q-Q",
         )
         .unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(1, 0);
-        board.blacken(1, 1);
+        board.blacken(1, 2);
         assert_eq!(board.commit_and_check_solution(), None);
     }
 
@@ -886,6 +983,36 @@ mod tests {
         let mut board = Board::new("TA--").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
+        assert_eq!(board.commit_and_check_solution(), Some(2));
+    }
+
+    #[test]
+    fn ta_cannot_mark_path() {
+        let mut board = Board::new(
+            "TA-\n\
+             Q-Q",
+        )
+        .unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(1, 0);
+        board.mark_path(1, 0);
+        board.blacken(1, 2);
+        assert_eq!(board.commit_and_check_solution(), Some(3));
+    }
+
+    #[test]
+    fn ta_cannot_change_letter() {
+        let mut board = Board::new(
+            "TA-\n\
+             Z-Q",
+        )
+        .unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.change_letter(1, 0, 'Q');
+        board.blacken(1, 0);
+        board.blacken(1, 2);
         assert_eq!(board.commit_and_check_solution(), Some(2));
     }
 
@@ -938,6 +1065,22 @@ mod tests {
         board.blacken(0, 1);
 
         assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    #[ignore = "Not yet implemented"]
+    fn x_reject_explicit_spurious_move_through() {
+        let mut board = Board::new("TXA").unwrap();
+
+        // TA, but should not specify the X in the middle. It's implicit
+        board.blacken(0, 0);
+        board.mark_path(0, 1);
+        board.blacken(0, 2);
+
+        // Exec TA
+        board.blacken(0, 1);
+
+        assert_eq!(board.commit_and_check_solution(), Some(1));
     }
 
     #[test]
@@ -1023,5 +1166,142 @@ mod tests {
         board.blacken(0, 5);
 
         assert_eq!(board.commit_and_check_solution(), Some(5));
+    }
+
+    #[test]
+    fn be_correct() {
+        let mut board = Board::new("BEA_Z").unwrap();
+
+        // BE
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+
+        // Exec BE
+        board.change_letter(0, 3, 't');
+
+        // TA
+        board.blacken(0, 3);
+        board.blacken(0, 2);
+
+        // Exec TA
+        board.blacken(0, 4);
+        assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    fn be_cannot_change_full_cell() {
+        let mut board = Board::new("BEZ").unwrap();
+
+        // BE
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+
+        // Exec BE, but not allowed to change regular cell
+        board.change_letter(0, 2, 'Q');
+        assert_eq!(board.commit_and_check_solution(), Some(2));
+    }
+
+    #[test]
+    fn be_cannot_change_letter_on_blackened() {
+        let mut board = Board::new("BEBE_").unwrap();
+
+        // BE
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+
+        // Exec BE
+        board.change_letter(0, 4, 'Z');
+
+        // BE
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+
+        // Exec BE, but not allowed to change letter of a blackened cell
+        board.change_letter(0, 0, 'Z');
+        assert_eq!(board.commit_and_check_solution(), Some(5));
+    }
+
+    #[test]
+    fn be_cannot_blacken() {
+        let mut board = Board::new("BEA_Z").unwrap();
+
+        // BE
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+
+        // Exec BE, but blacken is not allowed
+        board.blacken(0, 3);
+        board.change_letter(0, 3, 't');
+
+        // TA
+        board.blacken(0, 3);
+        board.blacken(0, 2);
+
+        // Exec TA
+        board.blacken(0, 4);
+        assert_eq!(board.commit_and_check_solution(), Some(2));
+    }
+
+    #[test]
+    fn be_cannot_mark_path() {
+        let mut board = Board::new("BEA_Z").unwrap();
+
+        // BE
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+
+        // Exec BE, but blacken is not allowed
+        board.mark_path(0, 3);
+        board.change_letter(0, 3, 't');
+
+        // TA
+        board.blacken(0, 3);
+        board.blacken(0, 2);
+
+        // Exec TA
+        board.blacken(0, 4);
+        assert_eq!(board.commit_and_check_solution(), Some(2));
+    }
+
+    #[test]
+    fn be_invalid_underscore() {
+        let mut board = Board::new("BELOK_").unwrap();
+
+        // BE
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+
+        // Exec BE, but dash not allowed
+        board.change_letter(0, 5, '_');
+
+        // LOK
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        board.blacken(0, 4);
+
+        // Exec LOK
+        board.blacken(0, 5);
+        assert_eq!(board.commit_and_check_solution(), Some(2));
+    }
+
+    #[test]
+    fn be_invalid_dash() {
+        let mut board = Board::new("BEL_OK_").unwrap();
+
+        // BE
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+
+        // Exec BE, but dash not allowed
+        board.change_letter(0, 3, '-');
+
+        // LOK
+        board.blacken(0, 2);
+        board.blacken(0, 4);
+        board.blacken(0, 5);
+
+        // Exec LOK
+        board.blacken(0, 6);
+        assert_eq!(board.commit_and_check_solution(), Some(2));
     }
 }

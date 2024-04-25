@@ -43,9 +43,11 @@ function onHashChange() {
 
 function onKeyDown(evt) {
     switch (evt.key) {
-        // Z to undo.
+        // CTRL-z to undo.
         case "z": {
-            onClickUndo();
+            if (evt.ctrlKey) {
+                onClickUndo();
+            }
             break;
         }
 
