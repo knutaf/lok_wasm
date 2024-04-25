@@ -7,6 +7,16 @@ document.getElementById("check_solution").addEventListener("click", onClickCheck
 document.getElementById("generate_form").addEventListener("submit", onGenerateSubmit);
 document.getElementById("undo").addEventListener("click", onClickUndo);
 
+{
+    const modeElements = document.getElementsByName("mode");
+    for (var i = 0; i < modeElements.length; i++)
+    {
+        modeElements[i].addEventListener("change", onModeChange);
+    }
+}
+
+var g_lastModeEditState = false;
+
 var g_anchor = null;
 var g_board = null;
 
@@ -57,12 +67,21 @@ function onKeyDown(evt) {
                 {
                     if (modeElements[i].checked) {
                         modeElements[(i + 1) % modeElements.length].checked = true;
+                        onModeChange();
                         break;
                     }
                 }
             }
             break;
         }
+    }
+}
+
+function onModeChange(evt) {
+    const nowInModeEdit = document.getElementById("modeEdit").checked;
+    if (nowInModeEdit != g_lastModeEditState) {
+        g_lastModeEditState = nowInModeEdit;
+        renderBoard();
     }
 }
 
@@ -92,6 +111,8 @@ function getMode() {
         return "blacken";
     } else if (document.getElementById("modeMarkPath").checked) {
         return "markPath";
+    } else if (document.getElementById("modeEdit").checked) {
+        return "modeEdit";
     }
 }
 
@@ -108,6 +129,22 @@ function onCellClick(evt) {
             renderBoard();
             break;
         }
+    }
+}
+
+function onLetterFocus(evt) {
+    const target = evt.currentTarget;
+    window.getSelection().selectAllChildren(target);
+}
+
+function onLetterInput(evt) {
+    const target = evt.currentTarget;
+    const cell = target.parentElement;
+
+    const letterText = target.textContent;
+    if (letterText.length > 0) {
+        g_board.change_letter(cell.boardRow, cell.boardCol, letterText.charAt(0));
+        renderBoard();
     }
 }
 
@@ -131,6 +168,8 @@ function onClickUndo(evt) {
 function renderBoard() {
     const width = g_board.width();
     const height = g_board.height();
+    const currentMode = getMode();
+    const isInEditMode = (currentMode == "modeEdit");
 
     const boardDisplay = document.getElementById("board_display");
 
@@ -146,7 +185,32 @@ function renderBoard() {
 
             if (boardCell.is_interactive()) {
                 cell.classList.add("normal_cell");
+
+                const letterDisplay = document.createElement("span");
+                letterDisplay.textContent = boardCell.get_display();
+
+                if (isInEditMode) {
+                    letterDisplay.classList.add("editable_letter_display");
+                    letterDisplay.contentEditable = "plaintext-only";
+                    letterDisplay.addEventListener("focus", onLetterFocus);
+                    letterDisplay.addEventListener("input", onLetterInput);
+                } else {
+                    letterDisplay.contentEditable = "false";
+                }
+
+                const markCountDisplay = document.createElement("sup");
+
+                const markCount = boardCell.get_mark_count();
+                if (markCount > 1) {
+                    markCountDisplay.textContent = "" + markCount;
+                } else {
+                    markCountDisplay.textContent = " ";
+                }
+
                 cell.addEventListener("click", onCellClick);
+
+                cell.appendChild(letterDisplay);
+                cell.appendChild(markCountDisplay);
             }
 
             if (boardCell.is_blackened()) {
@@ -156,21 +220,6 @@ function renderBoard() {
             if (boardCell.is_marked_for_path()) {
                 cell.classList.add("pathmarked");
             }
-
-            const letter = document.createElement("span");
-            letter.textContent = boardCell.get_display();
-
-            const markCountDisplay = document.createElement("sup");
-
-            const markCount = boardCell.get_mark_count();
-            if (markCount > 1) {
-                markCountDisplay.textContent = "" + markCount;
-            } else {
-                markCountDisplay.textContent = " ";
-            }
-
-            cell.appendChild(letter);
-            cell.appendChild(markCountDisplay);
             row.appendChild(cell);
         }
         boardTable.appendChild(row);

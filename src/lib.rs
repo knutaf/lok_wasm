@@ -119,12 +119,23 @@ impl BoardCell {
         self.is_marked_for_path = true;
         self.mark_count += 1;
     }
+
+    fn change_letter(&mut self, letter: char) -> bool {
+        match letter {
+            '-' | '_' => false,
+            _ => {
+                self.letter = Some(letter.to_ascii_uppercase());
+                true
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 enum Move {
     Blacken(RC),
     MarkPath(RC),
+    ChangeLetter(RC, char),
 }
 
 impl Move {
@@ -132,6 +143,7 @@ impl Move {
         match &self {
             Move::Blacken(rc) => rc,
             Move::MarkPath(rc) => rc,
+            Move::ChangeLetter(rc, _) => rc,
         }
     }
 }
@@ -235,6 +247,22 @@ impl Board {
 
         self.moves.push(BoardStep {
             mv: Move::MarkPath(target_rc.clone()),
+            grid: new_grid,
+        });
+    }
+
+    pub fn change_letter(&mut self, row: usize, col: usize, letter: char) {
+        assert!(row < self.grid.height());
+        assert!(col < self.grid.width());
+
+        let target_rc = RC(row, col);
+        let mut new_grid = self.get_latest().clone();
+        if !new_grid[&target_rc].change_letter(letter) {
+            return;
+        }
+
+        self.moves.push(BoardStep {
+            mv: Move::ChangeLetter(target_rc.clone(), letter),
             grid: new_grid,
         });
     }
@@ -410,6 +438,9 @@ impl Board {
                         | BoardState::ExecutingTLAK(_)
                         | BoardState::ExecutingTA(_) => state,
                     }
+                }
+                Move::ChangeLetter(target_rc, letter) => {
+                    panic!("not implemented")
                 }
             };
         }
