@@ -111,6 +111,13 @@ impl BoardCell {
         }
     }
 
+    fn get_letter_or_blank(&self) -> Option<char> {
+        match self.letter {
+            None => None,
+            Some(ch) => Some(ch),
+        }
+    }
+
     fn get_raw(&self) -> char {
         self.letter.unwrap()
     }
@@ -381,7 +388,7 @@ impl Board {
                             }
                         }
                         BoardState::ExecutingTA(chosen_letter_opt) => {
-                            if let Some(letter) = target.get_letter() {
+                            if let Some(letter) = target.get_letter_or_blank() {
                                 if let Some(chosen_letter) = chosen_letter_opt {
                                     if letter != chosen_letter {
                                         log!(
@@ -406,7 +413,7 @@ impl Board {
                                         continue;
                                     }
 
-                                    if let Some(cell_letter) = cell.get_letter() {
+                                    if let Some(cell_letter) = cell.get_letter_or_blank() {
                                         if cell_letter == letter {
                                             log!("{:?} is still {}", rc, letter);
                                             has_completed_all_letters = false;
@@ -970,6 +977,16 @@ mod tests {
         board.blacken(1, 0);
         board.blacken(1, 1);
         assert_eq!(board.commit_and_check_solution(), Some(3));
+    }
+
+    #[test]
+    fn ta_correct_blanks() {
+        let mut board = Board::new("TA__",).unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        assert_eq!(board.commit_and_check_solution(), None);
     }
 
     #[test]
