@@ -1,4 +1,3 @@
-import { memory } from "lok-wasm/lok_wasm_bg";
 import { Board, BoardCell } from "lok-wasm";
 
 window.addEventListener("hashchange", onHashChange);
