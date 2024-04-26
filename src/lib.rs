@@ -18,7 +18,7 @@ macro_rules! log {
     }
 }
 
-const KNOWN_KEYWORDS: [&'static str; 4] = ["LOK", "TLAK", "TA", "BE"];
+const KNOWN_KEYWORDS: [&'static str; 5] = ["LOK", "TLAK", "TA", "BE", "LOLO"];
 const WILDCARD_LETTER: char = '?';
 
 #[wasm_bindgen]
@@ -170,6 +170,7 @@ enum BoardState {
     ExecutingTLAK(Vec<RC>),
     ExecutingTA(Option<char>),
     ExecutingBE,
+    ExecutingLOLO(Option<RC>),
 }
 
 impl BoardState {
@@ -346,6 +347,7 @@ impl Board {
                                         "TLAK" => BoardState::ExecutingTLAK(vec![]),
                                         "TA" => BoardState::ExecutingTA(None),
                                         "BE" => BoardState::ExecutingBE,
+                                        "LOLO" => BoardState::ExecutingLOLO(None),
                                         _ => {
                                             panic!("Impossible unknown keyword {}", *known_keyword)
                                         }
@@ -436,6 +438,45 @@ impl Board {
                             log!("Cannot blacken while executing BE");
                             return Some(mv_num);
                         }
+                        BoardState::ExecutingLOLO(path_rc_opt) => {
+                            let path_rc = if let Some(path_rc) = path_rc_opt {
+                                if !Board::is_on_lolo_path(&simgrid, &path_rc, target_rc) {
+                                    log!("{:?} is not on LOLO path", target_rc);
+                                    return Some(mv_num);
+                                }
+
+                                assert!(!target.is_blackened());
+                                simgrid[target_rc].blacken();
+                                path_rc.clone()
+                            } else {
+                                assert!(!target.is_blackened());
+                                simgrid[target_rc].blacken();
+                                target_rc.clone()
+                            };
+
+                            let mut has_completed_lolo_path = true;
+                            for (rc, cell) in simgrid.enumerate_row_col() {
+                                if !Board::is_on_lolo_path(&simgrid, &path_rc, &rc) {
+                                    continue;
+                                }
+
+                                if !cell.is_done() {
+                                    log!(
+                                        "{:?} on LOLO path including {:?} is still not done",
+                                        rc,
+                                        path_rc
+                                    );
+                                    has_completed_lolo_path = false;
+                                    break;
+                                }
+                            }
+
+                            if has_completed_lolo_path {
+                                BoardState::idle()
+                            } else {
+                                BoardState::ExecutingLOLO(Some(path_rc))
+                            }
+                        }
                     }
                 }
                 Move::MarkPath(target_rc) => match state {
@@ -452,7 +493,8 @@ impl Board {
                     BoardState::ExecutingLOK
                     | BoardState::ExecutingTLAK(_)
                     | BoardState::ExecutingTA(_)
-                    | BoardState::ExecutingBE => {
+                    | BoardState::ExecutingBE
+                    | BoardState::ExecutingLOLO(_) => {
                         log!("Cannot mark path while executing a keyword");
                         return Some(mv_num);
                     }
@@ -461,7 +503,8 @@ impl Board {
                     BoardState::GatheringKeyword(_, _)
                     | BoardState::ExecutingLOK
                     | BoardState::ExecutingTLAK(_)
-                    | BoardState::ExecutingTA(_) => {
+                    | BoardState::ExecutingTA(_)
+                    | BoardState::ExecutingLOLO(_) => {
                         if target.was_ever_wildcard() {
                             if !simgrid[target_rc].change_letter(*letter) {
                                 log!("Not allowed to change letter to '{}'", letter);
@@ -686,6 +729,36 @@ impl Board {
                 return false;
             }
         }
+    }
+
+    fn is_on_lolo_path(grid: &BoardGrid, path_rc: &RC, target_rc: &RC) -> bool {
+        assert!(path_rc.0 < grid.height());
+        assert!(path_rc.1 < grid.width());
+        assert!(target_rc.0 < grid.height());
+        assert!(target_rc.1 < grid.width());
+
+        let (row_diff, col_diff) = if target_rc.0 > path_rc.0 {
+            // target row is higher, so target col should be lower
+            if target_rc.1 >= path_rc.1 {
+                return false;
+            }
+
+            (target_rc.0 - path_rc.0, path_rc.1 - target_rc.1)
+        } else if target_rc.0 < path_rc.0 {
+            // target row is lower, so col should be higher
+            if target_rc.1 <= path_rc.1 {
+                return false;
+            }
+
+            (path_rc.0 - target_rc.0, target_rc.1 - path_rc.1)
+        } else {
+            return false;
+        };
+
+        assert!(row_diff != 0);
+        assert!(col_diff != 0);
+
+        row_diff == col_diff
     }
 }
 
@@ -981,7 +1054,7 @@ mod tests {
 
     #[test]
     fn ta_correct_blanks() {
-        let mut board = Board::new("TA__",).unwrap();
+        let mut board = Board::new("TA__").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(0, 2);
@@ -1185,6 +1258,17 @@ mod tests {
     }
 
     #[test]
+    fn be_unsolvable_no_exec() {
+        let mut board = Board::new("BE-").unwrap();
+
+        // BE
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+
+        assert_eq!(board.commit_and_check_solution(), Some(2));
+    }
+
+    #[test]
     fn be_cannot_change_full_cell() {
         let mut board = Board::new("BEZ").unwrap();
 
@@ -1305,7 +1389,7 @@ mod tests {
     fn wildcard_correct_multiuse() {
         let mut board = Board::new(
             "?X\n\
-                                    XX",
+             XX",
         )
         .unwrap();
 
@@ -1332,7 +1416,7 @@ mod tests {
     fn wildcard_change_to_x() {
         let mut board = Board::new(
             "LO?\n\
-                                    --K",
+             --K",
         )
         .unwrap();
 
@@ -1475,6 +1559,336 @@ mod tests {
 
         // Exec TA
         board.blacken(0, 5);
+
+        assert_eq!(board.commit_and_check_solution(), Some(5));
+    }
+
+    #[test]
+    fn lolo_correct_single() {
+        let mut board = Board::new("LOLO_").unwrap();
+
+        // LOLO
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+
+        // Exec LOLO
+        board.blacken(0, 4);
+
+        assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    fn lolo_correct_multi() {
+        let mut board = Board::new(
+            "LOLO\n\
+             --_-\n\
+             -_--\n\
+             _---",
+        )
+        .unwrap();
+
+        // LOLO
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+
+        // Exec LOLO
+        board.blacken(3, 0);
+        board.blacken(2, 1);
+        board.blacken(1, 2);
+
+        assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    fn lolo_correct_multi_with_gap() {
+        let mut board = Board::new(
+            "LOLO\n\
+             --_-\n\
+             ----\n\
+             _---",
+        )
+        .unwrap();
+
+        // LOLO
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+
+        // Exec LOLO
+        board.blacken(3, 0);
+        board.blacken(1, 2);
+
+        assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    fn lolo_unsolvable_cant_execute() {
+        let mut board = Board::new("LOLO").unwrap();
+
+        // LOLO. No exec, because board is done.
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+
+        assert_eq!(board.commit_and_check_solution(), Some(4));
+    }
+
+    #[test]
+    fn lolo_wrong_direction() {
+        let mut board = Board::new(
+            "LOLO\n\
+             -_--\n\
+             --_-\n\
+             ---_",
+        )
+        .unwrap();
+
+        // LOLO
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+
+        // Exec LOLO, but it only gets one cell because it's going to the upper-right.
+        board.blacken(3, 3);
+
+        assert_eq!(board.commit_and_check_solution(), Some(5));
+    }
+
+    #[test]
+    fn lolo_cant_target_blackened() {
+        let mut board = Board::new("LOLO").unwrap();
+
+        // LOLO
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+
+        // Exec LOLO, but it's not allowed to target a space that's already blackened
+        board.blacken(0, 0);
+
+        assert_eq!(board.commit_and_check_solution(), Some(4));
+    }
+
+    #[test]
+    fn lolo_with_x() {
+        let mut board = Board::new(
+            "XLOX\n\
+             X--X\n\
+             TA--",
+        )
+        .unwrap();
+
+        // LO
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.mark_path(0, 3);
+        board.mark_path(1, 3);
+        board.mark_path(1, 0);
+        board.mark_path(0, 0);
+
+        // LO
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+
+        // Exec LOLO, only one cell
+        board.blacken(1, 0);
+
+        // TA
+        board.blacken(2, 0);
+        board.blacken(2, 1);
+
+        // Exec TA
+        board.blacken(0, 0);
+        board.blacken(0, 3);
+        board.blacken(1, 3);
+
+        assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    fn lolo_incomplete_path_1() {
+        let mut board = Board::new(
+            "LOLO\n\
+             LO_K\n\
+             -_--\n\
+             _---",
+        )
+        .unwrap();
+
+        // LOLO
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+
+        // Exec LOLO, but try to skip the lowest one
+        board.blacken(2, 1);
+        board.blacken(1, 2);
+
+        // LOK
+        board.blacken(1, 0);
+        board.blacken(1, 1);
+        board.blacken(1, 2);
+
+        // Exec LOK
+        board.blacken(3, 0);
+
+        assert_eq!(board.commit_and_check_solution(), Some(6));
+    }
+
+    #[test]
+    fn lolo_incomplete_path_2() {
+        let mut board = Board::new(
+            "LOLO\n\
+             LO_K\n\
+             -_--\n\
+             _---",
+        )
+        .unwrap();
+
+        // LOLO
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+
+        // Exec LOLO, but try to skip the middle one
+        board.blacken(3, 0);
+        board.blacken(1, 2);
+
+        // LOK
+        board.blacken(1, 0);
+        board.blacken(1, 1);
+        board.blacken(1, 2);
+
+        // Exec LOK
+        board.blacken(2, 1);
+
+        assert_eq!(board.commit_and_check_solution(), Some(6));
+    }
+
+    #[test]
+    fn lolo_incomplete_path_3() {
+        let mut board = Board::new(
+            "LOLO\n\
+             LO_K\n\
+             -_--\n\
+             _---",
+        )
+        .unwrap();
+
+        // LOLO
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+
+        // Exec LOLO, but try to skip the top one
+        board.blacken(3, 0);
+        board.blacken(2, 1);
+
+        // LOK
+        board.blacken(1, 0);
+        board.blacken(1, 1);
+        board.blacken(1, 2);
+
+        // Exec LOK
+        board.blacken(1, 2);
+
+        assert_eq!(board.commit_and_check_solution(), Some(6));
+    }
+
+    #[test]
+    fn lolo_not_on_path_same_row() {
+        let mut board = Board::new(
+            "LOLO\n\
+             -__-",
+        )
+        .unwrap();
+
+        // LOLO
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+
+        // Exec LOLO, but both cells are on the same row
+        board.blacken(1, 1);
+        board.blacken(1, 2);
+
+        assert_eq!(board.commit_and_check_solution(), Some(5));
+    }
+
+    #[test]
+    fn lolo_not_on_path_same_col() {
+        let mut board = Board::new(
+            "LOLO\n\
+             -_--\n\
+             -_--",
+        )
+        .unwrap();
+
+        // LOLO
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+
+        // Exec LOLO, but both cells are on the same col
+        board.blacken(1, 1);
+        board.blacken(2, 1);
+
+        assert_eq!(board.commit_and_check_solution(), Some(5));
+    }
+
+    #[test]
+    fn lolo_not_on_path_disjoint_diagonal_above() {
+        let mut board = Board::new(
+            "LOLO\n\
+             ---_\n\
+             -_--",
+        )
+        .unwrap();
+
+        // LOLO
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+
+        // Exec LOLO, but both cells are not on the same diagonal
+        board.blacken(2, 1);
+        board.blacken(1, 3);
+
+        assert_eq!(board.commit_and_check_solution(), Some(5));
+    }
+
+    #[test]
+    fn lolo_not_on_path_disjoint_diagonal_below() {
+        let mut board = Board::new(
+            "LOLO\n\
+             ---_\n\
+             -_--",
+        )
+        .unwrap();
+
+        // LOLO
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+
+        // Exec LOLO, but both cells are not on the same diagonal
+        board.blacken(1, 3);
+        board.blacken(2, 1);
 
         assert_eq!(board.commit_and_check_solution(), Some(5));
     }
