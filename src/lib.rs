@@ -19,6 +19,7 @@ macro_rules! log {
 }
 
 const KNOWN_KEYWORDS: [&'static str; 4] = ["LOK", "TLAK", "TA", "BE"];
+const WILDCARD_LETTER: char = '?';
 
 #[wasm_bindgen]
 #[derive(Copy, Clone, PartialEq)]
@@ -26,6 +27,7 @@ struct BoardCell {
     letter: Option<char>,
     is_blackened: bool,
     is_marked_for_path: bool,
+    was_ever_wildcard: bool,
     mark_count: u32,
 }
 
@@ -60,6 +62,7 @@ impl BoardCell {
             letter: None,
             is_blackened: false,
             is_marked_for_path: false,
+            was_ever_wildcard: false,
             mark_count: 0,
         }
     }
@@ -72,6 +75,7 @@ impl BoardCell {
                 '-' => None,
                 _ => Some(letter.to_ascii_uppercase()),
             },
+            was_ever_wildcard: letter == WILDCARD_LETTER,
             is_blackened: false,
             is_marked_for_path: false,
             mark_count: 0,
@@ -105,6 +109,10 @@ impl BoardCell {
         !self.is_blackened() && self.get_raw() == 'X'
     }
 
+    fn was_ever_wildcard(&self) -> bool {
+        self.was_ever_wildcard
+    }
+
     fn get_letter(&self) -> Option<char> {
         match self.letter {
             None => None,
@@ -132,6 +140,9 @@ impl BoardCell {
             '-' | '_' => false,
             _ => {
                 self.letter = Some(letter.to_ascii_uppercase());
+                if letter == WILDCARD_LETTER {
+                    self.was_ever_wildcard = true;
+                }
                 true
             }
         }
@@ -329,7 +340,6 @@ impl Board {
                                     // Have now accumulated a whole keyword. Black it out.
                                     for mv in new_keyword_moves.iter() {
                                         if let Move::Blacken(rc) = mv {
-                                            assert!(!simgrid[rc].is_blackened());
                                             simgrid[rc].blacken();
                                         }
                                     }
@@ -455,8 +465,20 @@ impl Board {
                     | BoardState::ExecutingLOK
                     | BoardState::ExecutingTLAK(_)
                     | BoardState::ExecutingTA(_) => {
-                        log!("Not allowed to change letter in state {:?}", state);
-                        return Some(mv_num);
+                        if target.was_ever_wildcard() {
+                            if !simgrid[target_rc].change_letter(*letter) {
+                                log!("Not allowed to change letter to '{}'", letter);
+                                return Some(mv_num);
+                            }
+
+                            state
+                        } else {
+                            log!(
+                                "Not allowed to change this cell's letter in state {:?}",
+                                state
+                            );
+                            return Some(mv_num);
+                        }
                     }
                     BoardState::ExecutingBE => {
                         if !target.is_blank() {
@@ -850,24 +872,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Not yet implemented"]
-    fn reject_explicit_spurious_adjacency() {
-        let mut board = Board::new("LOKL_OK_").unwrap();
-        board.blacken(0, 0);
-        board.blacken(0, 1);
-        board.blacken(0, 2);
-        board.blacken(0, 4);
-
-        // Mark path is unnecessary and disallowed.
-        board.blacken(0, 3);
-        board.mark_path(0, 4);
-        board.blacken(0, 5);
-        board.blacken(0, 6);
-        board.blacken(0, 7);
-        assert_eq!(board.commit_and_check_solution(), None);
-    }
-
-    #[test]
     fn tlak_correct() {
         let mut board = Board::new("TLAK__").unwrap();
         board.blacken(0, 0);
@@ -1065,22 +1069,6 @@ mod tests {
         board.blacken(0, 1);
 
         assert_eq!(board.commit_and_check_solution(), None);
-    }
-
-    #[test]
-    #[ignore = "Not yet implemented"]
-    fn x_reject_explicit_spurious_move_through() {
-        let mut board = Board::new("TXA").unwrap();
-
-        // TA, but should not specify the X in the middle. It's implicit
-        board.blacken(0, 0);
-        board.mark_path(0, 1);
-        board.blacken(0, 2);
-
-        // Exec TA
-        board.blacken(0, 1);
-
-        assert_eq!(board.commit_and_check_solution(), Some(1));
     }
 
     #[test]
@@ -1303,5 +1291,183 @@ mod tests {
         // Exec LOK
         board.blacken(0, 6);
         assert_eq!(board.commit_and_check_solution(), Some(2));
+    }
+
+    #[test]
+    fn wildcard_correct_multiuse() {
+        let mut board = Board::new(
+            "?X\n\
+                                    XX",
+        )
+        .unwrap();
+
+        // T
+        board.change_letter(0, 0, 'T');
+        board.blacken(0, 0);
+        board.mark_path(0, 1);
+        board.mark_path(1, 1);
+        board.mark_path(1, 0);
+
+        // A
+        board.change_letter(0, 0, 'A');
+        board.blacken(0, 0);
+
+        // Exec TA
+        board.blacken(0, 1);
+        board.blacken(1, 0);
+        board.blacken(1, 1);
+
+        assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    fn wildcard_change_to_x() {
+        let mut board = Board::new(
+            "LO?\n\
+                                    --K",
+        )
+        .unwrap();
+
+        // LOK
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.change_letter(0, 2, 'X');
+        board.mark_path(0, 2);
+        board.blacken(1, 2);
+
+        // Exec LOK
+        board.blacken(0, 2);
+
+        assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    fn wildcard_correct_change_first_then_blacken() {
+        let mut board = Board::new("????").unwrap();
+
+        // LOK
+        board.change_letter(0, 0, 'L');
+        board.change_letter(0, 1, 'O');
+        board.change_letter(0, 2, 'K');
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+
+        // Exec LOK
+        board.blacken(0, 3);
+
+        assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    fn wildcard_correct_change_and_blacken_interleaved() {
+        let mut board = Board::new("????").unwrap();
+
+        // LOK
+        board.change_letter(0, 0, 'L');
+        board.blacken(0, 0);
+        board.change_letter(0, 1, 'O');
+        board.blacken(0, 1);
+        board.change_letter(0, 2, 'K');
+        board.blacken(0, 2);
+
+        // Exec LOK
+        board.blacken(0, 3);
+
+        assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    fn be_makes_wildcard() {
+        let mut board = Board::new("BE_AQ").unwrap();
+
+        // BE
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+
+        // Exec BE
+        board.change_letter(0, 2, '?');
+
+        // TA
+        board.change_letter(0, 2, 'T');
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+
+        // Exec TA
+        board.blacken(0, 4);
+
+        assert_eq!(board.commit_and_check_solution(), None);
+    }
+
+    #[test]
+    fn cannot_change_regular_letter() {
+        let mut board = Board::new("LOQ_").unwrap();
+
+        // LOK, but can't randomly change a regular letter
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.change_letter(0, 2, 'K');
+        board.blacken(0, 2);
+
+        // Exec LOK
+        board.blacken(0, 3);
+
+        assert_eq!(board.commit_and_check_solution(), Some(2));
+    }
+
+    #[test]
+    fn cannot_change_blank() {
+        let mut board = Board::new("LO_K").unwrap();
+
+        // LOK, but can't randomly change a blank
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.change_letter(0, 2, 'K');
+        board.blacken(0, 2);
+
+        // Exec LOK
+        board.blacken(0, 3);
+
+        assert_eq!(board.commit_and_check_solution(), Some(2));
+    }
+
+    #[test]
+    fn cannot_change_gap() {
+        let mut board = Board::new("LO-K").unwrap();
+
+        // LOK, but can't randomly change a blank
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.change_letter(0, 2, 'K');
+        board.blacken(0, 2);
+
+        // Exec LOK
+        board.blacken(0, 3);
+
+        assert_eq!(board.commit_and_check_solution(), Some(2));
+    }
+
+    #[test]
+    fn wildcard_cannot_change_blackened() {
+        let mut board = Board::new("?OK_AQ").unwrap();
+
+        // LOK
+        board.change_letter(0, 0, 'L');
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+
+        // Exec LOK
+        board.blacken(0, 3);
+
+        // TA, but you can't change a blackened cell, even if it had a wildcard before
+        board.change_letter(0, 0, 'T');
+        board.blacken(0, 0);
+        board.blacken(0, 4);
+
+        // Exec TA
+        board.blacken(0, 5);
+
+        assert_eq!(board.commit_and_check_solution(), Some(5));
     }
 }
