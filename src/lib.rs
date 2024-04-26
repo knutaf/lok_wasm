@@ -23,7 +23,7 @@ const WILDCARD_LETTER: char = '?';
 
 #[wasm_bindgen]
 #[derive(Copy, Clone, PartialEq)]
-struct BoardCell {
+pub struct BoardCell {
     letter: Option<char>,
     is_blackened: bool,
     is_marked_for_path: bool,
@@ -57,16 +57,6 @@ impl BoardCell {
 }
 
 impl BoardCell {
-    fn gap() -> BoardCell {
-        BoardCell {
-            letter: None,
-            is_blackened: false,
-            is_marked_for_path: false,
-            was_ever_wildcard: false,
-            mark_count: 0,
-        }
-    }
-
     fn raw(letter: char) -> BoardCell {
         assert!(letter.is_ascii());
 
@@ -293,7 +283,7 @@ impl Board {
     pub fn commit_and_check_solution(&self) -> Option<usize> {
         let mut simgrid = self.grid.clone();
         let mut state = BoardState::idle();
-        for (mv_num, BoardStep { mv: mv, grid: _ }) in self.moves.iter().enumerate() {
+        for (mv_num, BoardStep { mv, grid: _ }) in self.moves.iter().enumerate() {
             log!("{:2}: state {:?}, move {:?}", mv_num, state, mv);
 
             let target = simgrid[mv.get_rc()].clone();
@@ -1058,6 +1048,7 @@ mod tests {
         assert_eq!(board.commit_and_check_solution(), None);
     }
 
+    #[test]
     fn x_implicit_move_through() {
         let mut board = Board::new("TXA").unwrap();
 
