@@ -7,7 +7,7 @@ mod utils;
 
 use crate::grid::{Grid, RC};
 
-// A macro to provide `println!(..)`-style syntax for `console.log` logging.
+// A macro to provide `println!(..)`-style syntax for `console.log` logging. On non-wasm platforms, thunks to println!.
 macro_rules! log {
     ( $( $t:tt )* ) => {
         if cfg!(target_family = "wasm") {
@@ -19,6 +19,9 @@ macro_rules! log {
 }
 
 const KNOWN_KEYWORDS: [&'static str; 5] = ["LOK", "TLAK", "TA", "BE", "LOLO"];
+const GAP_LETTER: char = '-';
+const BLANK_LETTER: char = '_';
+const CONDUCTOR_LETTER: char = 'X';
 const WILDCARD_LETTER: char = '?';
 
 #[wasm_bindgen]
@@ -35,34 +38,41 @@ type BoardGrid = Grid<BoardCell>;
 
 #[wasm_bindgen]
 impl BoardCell {
+    /// Tells if the player should be able to interact with this cell in the UI.
     pub fn is_interactive(&self) -> bool {
         self.letter.is_some()
     }
 
+    /// Tells if this cell should be rendered as blackened out.
     pub fn is_blackened(&self) -> bool {
         self.is_blackened
     }
 
+    /// Tells if this cell should be rendered as marked for a path.
     pub fn is_marked_for_path(&self) -> bool {
         self.is_marked_for_path
     }
 
+    /// Gets the letter that should be displayed on this cell.
     pub fn get_display(&self) -> char {
         self.get_letter().unwrap_or(' ')
     }
 
+    /// Gets the number of times the player has interacted with this cell, for rendering.
     pub fn get_mark_count(&self) -> u32 {
         self.mark_count
     }
 }
 
 impl BoardCell {
+    /// Constructs a new cell with the given letter. The cell may be end up having a special function like being a gap,
+    /// conductor, etc., based on what is provided in `letter`.
     fn raw(letter: char) -> BoardCell {
         assert!(letter.is_ascii());
 
         BoardCell {
             letter: match letter {
-                '-' => None,
+                GAP_LETTER => None,
                 _ => Some(letter.to_ascii_uppercase()),
             },
             was_ever_wildcard: letter == WILDCARD_LETTER,
@@ -72,45 +82,54 @@ impl BoardCell {
         }
     }
 
+    /// Creates a blank cell, not a gap.
     fn blank() -> BoardCell {
-        BoardCell::raw('_')
+        BoardCell::raw(BLANK_LETTER)
     }
 
+    /// Returns whether this is a blank (not gap) cell.
     fn is_blank(&self) -> bool {
         match self.letter {
-            Some('_') => true,
+            Some(BLANK_LETTER) => true,
             _ => false,
         }
     }
 
+    /// Returns if this cell is considered complete for purposes of checking if the whole puzzle is solved.
     fn is_done(&self) -> bool {
         self.letter.is_none() || self.is_blackened()
     }
 
+    /// Returns if this cell can be traversed as part of checking if two cells are adjacent.
     fn is_traversible_for_adjacency(&self) -> bool {
         self.is_done()
     }
 
+    /// Returns if this cell can be traversed as part of gathering a keyword.
     fn is_traversible_for_keyword(&self) -> bool {
         self.is_traversible_for_adjacency() || self.is_conductor()
     }
 
+    /// Returns if this cell is an active (not blackened) conductor.
     fn is_conductor(&self) -> bool {
-        !self.is_blackened() && self.get_raw() == 'X'
+        !self.is_blackened() && self.get_raw() == CONDUCTOR_LETTER
     }
 
+    /// Returns if this cell ever was ever a wildcard, which generally means its contents can be changed.
     fn was_ever_wildcard(&self) -> bool {
         self.was_ever_wildcard
     }
 
+    /// Returns the letter in this cell.
     fn get_letter(&self) -> Option<char> {
         match self.letter {
             None => None,
-            Some('_') => None,
+            Some(BLANK_LETTER) => None,
             Some(ch) => Some(ch),
         }
     }
 
+    /// Returns the letter in this cell, allowing returning the blank character too.
     fn get_letter_or_blank(&self) -> Option<char> {
         match self.letter {
             None => None,
@@ -118,23 +137,29 @@ impl BoardCell {
         }
     }
 
+    /// Returns the letter in this cell, and assumes it is not a gap.
     fn get_raw(&self) -> char {
         self.letter.unwrap()
     }
 
+    /// Marks this cell as blackened.
     fn blacken(&mut self) {
         self.is_blackened = true;
         self.mark_count += 1;
     }
 
+    /// Marks this cell as part of a path.
     fn mark_path(&mut self) {
         self.is_marked_for_path = true;
         self.mark_count += 1;
     }
 
-    fn change_letter(&mut self, letter: char) -> bool {
+    /// Attempts to change the letter in this cell and returns true if it was able to be changed or false if it wasn't
+    /// permitted.
+    fn try_change_letter(&mut self, letter: char) -> bool {
         match letter {
-            '-' | '_' => false,
+            // Not allowed to change the letter to a gap.
+            GAP_LETTER => false,
             _ => {
                 self.letter = Some(letter.to_ascii_uppercase());
                 if letter == WILDCARD_LETTER {
@@ -154,6 +179,7 @@ enum Move {
 }
 
 impl Move {
+    /// Gets the row and column this move is targeting.
     fn get_rc(&self) -> &RC {
         match &self {
             Move::Blacken(rc) => rc,
@@ -165,15 +191,40 @@ impl Move {
 
 #[derive(Clone, Debug)]
 enum BoardState {
+    // In this state, the player is choosing the cells to be used in a keyword. There are a certain number of recognized
+    // keywords, given in `KNOWN_KEYWORDS`. The letters of a keyword must be connected such that the result of
+    // `is_connected_for_keyword` is true between them--see that function for more notes on how keywords can be
+    // connected.
+    //
+    // Once the entire keyword is found, the cells are blackened out and then the player is expected to execute the
+    // keyword. See the below states for the expectations of each individual keyword.
+    //
+    // Once the keyword is executed, the simulation returns to the idle state, which is gathering the next keyword.
     GatheringKeyword(String, Vec<Move>),
+
+    // The LOK keyword expects the player to blacken one cell anywhere in the board.
     ExecutingLOK,
-    ExecutingTLAK(Vec<RC>),
+
+    // The TLAK keyword expects the player to blacken two adjacent cells anywhere on the board. Adjacency is determined
+    // by a true result from `is_adjacent`--see that function for more about what counts as adjacent.
+    ExecutingTLAK(Option<RC>),
+
+    // The TA keyword expects the player to blacken all cells on the board with a specified letter. The player specifies
+    // which letter they're targeting by the first cell they choose during the execution phase. Blank cells are also
+    // permitted. Thereafter, the player is expected to target all cells that match the letter.
     ExecutingTA(Option<char>),
+
+    // The BE keyword expects the player to fill in one blank cell with a letter of their choice.
     ExecutingBE,
+
+    // The LOLO keyword expects the player to choose a cell and then blacken all cells in a diagonal line extending
+    // down-left and up-right from there. The order of blackening doesn't matter, but all cells along that diagonal must
+    // be blackened.
     ExecutingLOLO(Option<RC>),
 }
 
 impl BoardState {
+    /// Returns a new state that represents being idle in the simulation.
     fn idle() -> BoardState {
         BoardState::GatheringKeyword(String::new(), vec![])
     }
@@ -192,9 +243,11 @@ pub struct Board {
 
 #[wasm_bindgen]
 impl Board {
+    /// Constructs a new board, given player input.
     pub fn new(contents: &str) -> Option<Board> {
         log!("puzzle:\n{}", contents);
 
+        // First determine the size of the board. It is inferred from the number of lines and the length of each line.
         let mut rows = 0;
         let mut cols = 0;
         for line in contents.lines() {
@@ -203,6 +256,12 @@ impl Board {
             }
 
             if line.len() != cols {
+                log!(
+                    "Row {} had {} cols, but needed to have {} cols to match the rows above it!",
+                    rows,
+                    line.len(),
+                    cols
+                );
                 return None;
             }
 
@@ -214,6 +273,7 @@ impl Board {
             moves: vec![],
         };
 
+        // Fill in the board.
         let mut row = 0;
         for line in contents.lines() {
             let mut col = 0;
@@ -228,22 +288,27 @@ impl Board {
         Some(board)
     }
 
+    /// Gets the number of columns in the board.
     pub fn width(&self) -> u32 {
         self.grid.width() as u32
     }
 
+    /// Gets the number of rows in the board.
     pub fn height(&self) -> u32 {
         self.grid.height() as u32
     }
 
+    /// Gets the specified location on the board. The upper-left corner is `RC(0, 0)`.
     pub fn get(&self, row: usize, col: usize) -> BoardCell {
         self.get_latest()[&RC(row, col)].clone()
     }
 
+    /// Marks the specified cell as blackened and tracks this move in the solution.
     pub fn blacken(&mut self, row: usize, col: usize) {
         assert!(row < self.grid.height());
         assert!(col < self.grid.width());
 
+        // Make a copy of the entire board and store that with the move, for easy undo.
         let target_rc = RC(row, col);
         let mut new_grid = self.get_latest().clone();
         new_grid[&target_rc].blacken();
@@ -254,10 +319,12 @@ impl Board {
         });
     }
 
+    /// Marks the specified cell as part of a path and tracks this move in the solution.
     pub fn mark_path(&mut self, row: usize, col: usize) {
         assert!(row < self.grid.height());
         assert!(col < self.grid.width());
 
+        // Make a copy of the entire board and store that with the move, for easy undo.
         let target_rc = RC(row, col);
         let mut new_grid = self.get_latest().clone();
         new_grid[&target_rc].mark_path();
@@ -268,13 +335,15 @@ impl Board {
         });
     }
 
+    /// Changes the letter in a cell and tracks this move in the solution.
     pub fn change_letter(&mut self, row: usize, col: usize, letter: char) {
         assert!(row < self.grid.height());
         assert!(col < self.grid.width());
 
+        // Make a copy of the entire board and store that with the move, for easy undo.
         let target_rc = RC(row, col);
         let mut new_grid = self.get_latest().clone();
-        if !new_grid[&target_rc].change_letter(letter) {
+        if !new_grid[&target_rc].try_change_letter(letter) {
             return;
         }
 
@@ -284,25 +353,46 @@ impl Board {
         });
     }
 
+    /// Removes the latest move from the solution.
     pub fn undo(&mut self) {
         let _ = self.moves.pop();
     }
 
+    /// Evaluates the moves that have been tracked so far to see if this is a valid solution. Returns None if it is
+    /// valid, or Some(x) where x is the 0-based move number where the solution was found to be incorrect. For example,
+    /// if the very first move is wrong, it will return `Some(0)`. Also, if all moves are valid but the board either
+    /// still isn't complete at the end or isn't idle, then it returns `Some(moves.len())`.
     pub fn commit_and_check_solution(&self) -> Option<usize> {
+        // Create a copy of the board that will be modified through the simulation and checked at each step for
+        // validity.
         let mut simgrid = self.grid.clone();
+
+        // The simulation starts at idle.
         let mut state = BoardState::idle();
+
+        // Iterate through all the tracked moves, checking each one for validity.
         for (mv_num, BoardStep { mv, grid: _ }) in self.moves.iter().enumerate() {
             log!("{:2}: state {:?}, move {:?}", mv_num, state, mv);
 
-            let target = simgrid[mv.get_rc()].clone();
+            // `target_rc` is the location of the cell being targeted by this move. `target` is the cell itself.
+            let target_rc = mv.get_rc();
+            let target = simgrid[target_rc].clone();
+
+            // None of the currently used moves, blacken, mark path, or change letter, are valid to target a cell that
+            // is already blackened. Blackened cells can be traversed for adjacency, but that's it.
             if target.is_blackened() {
-                log!("{:?} already blackened", mv.get_rc());
+                log!("{:?} already blackened", target_rc);
                 return Some(mv_num);
             }
 
             state = match mv {
-                Move::Blacken(target_rc) => {
+                // Blackening a cell has two uses:
+                // 1. when gathering a keyword, it defers blackening until the entire keyword is gathered, then the
+                //    whole keyword is blackened at once.
+                // 2. when executing a keyword, the cell is blackened right away.
+                Move::Blacken(_) => {
                     match state {
+                        // The player is expected to gather the next letter in a keyword.
                         BoardState::GatheringKeyword(keyword, keyword_moves) => {
                             if !Board::is_connected_for_keyword(&simgrid, &keyword_moves, target_rc)
                             {
@@ -325,7 +415,7 @@ impl Board {
                                     return Some(mv_num);
                                 }
 
-                                // So far this is a possible keyword, so accept the RC of the latest letter.
+                                // So far this is a possible keyword, so accept the latest move.
                                 let mut new_keyword_moves = keyword_moves.clone();
                                 new_keyword_moves.push(mv.clone());
 
@@ -342,9 +432,11 @@ impl Board {
                                         }
                                     }
 
+                                    // Transition to the "executing" state, where the next moves are expected to
+                                    // fulfill a different condition according to which keyword was just found.
                                     match *known_keyword {
                                         "LOK" => BoardState::ExecutingLOK,
-                                        "TLAK" => BoardState::ExecutingTLAK(vec![]),
+                                        "TLAK" => BoardState::ExecutingTLAK(None),
                                         "TA" => BoardState::ExecutingTA(None),
                                         "BE" => BoardState::ExecutingBE,
                                         "LOLO" => BoardState::ExecutingLOLO(None),
@@ -353,6 +445,8 @@ impl Board {
                                         }
                                     }
                                 } else {
+                                    // Next state is still gathering keywords, but including the most recently gathered
+                                    // letter.
                                     BoardState::GatheringKeyword(new_keyword, new_keyword_moves)
                                 }
                             } else {
@@ -361,13 +455,17 @@ impl Board {
                             }
                         }
                         BoardState::ExecutingLOK => {
+                            // For executing LOK, the player is expected to blacken exactly one cell.
                             assert!(!target.is_blackened());
                             simgrid[target_rc].blacken();
                             BoardState::idle()
                         }
-                        BoardState::ExecutingTLAK(exec_rcs) => {
-                            if let Some(last_exec_rc) = exec_rcs.last() {
-                                if !Board::is_adjacent(&simgrid, last_exec_rc, target_rc) {
+                        BoardState::ExecutingTLAK(exec_rc_opt) => {
+                            // For executing TLAK, the player is expected to blacken two adjacent cells.
+
+                            // If this is the second cell, make sure it is adjacent to the first cell.
+                            if let Some(ref last_exec_rc) = exec_rc_opt {
+                                if !Board::is_adjacent(&simgrid, &last_exec_rc, target_rc) {
                                     log!(
                                         "{:?} not adjacent to {:?} for TLAK blacken",
                                         last_exec_rc,
@@ -381,16 +479,19 @@ impl Board {
                             assert!(!target.is_blackened());
                             simgrid[target_rc].blacken();
 
-                            if exec_rcs.len() == 1 {
+                            if exec_rc_opt.is_some() {
                                 BoardState::idle()
                             } else {
-                                let mut next_exec_rcs = exec_rcs.clone();
-                                next_exec_rcs.push(target_rc.clone());
-                                BoardState::ExecutingTLAK(next_exec_rcs)
+                                BoardState::ExecutingTLAK(Some(target_rc.clone()))
                             }
                         }
                         BoardState::ExecutingTA(chosen_letter_opt) => {
+                            // For executing TA, the player chooses one letter and has to black out all the cells with
+                            // that letter.
+
                             if let Some(letter) = target.get_letter_or_blank() {
+                                // If the user has chosen a letter from a previous move during this execution, make sure
+                                // the new letter being chosen matches it.
                                 if let Some(chosen_letter) = chosen_letter_opt {
                                     if letter != chosen_letter {
                                         log!(
@@ -439,6 +540,9 @@ impl Board {
                             return Some(mv_num);
                         }
                         BoardState::ExecutingLOLO(path_rc_opt) => {
+                            // For executing LOLO, the player is expected to choose one non-blackened cell and then go
+                            // on to blacken all cells along that diagonal, from bottom-left to upper-right. Order of
+                            // blackening doesn't matter.
                             let path_rc = if let Some(path_rc) = path_rc_opt {
                                 if !Board::is_on_lolo_path(&simgrid, &path_rc, target_rc) {
                                     log!("{:?} is not on LOLO path", target_rc);
@@ -454,6 +558,8 @@ impl Board {
                                 target_rc.clone()
                             };
 
+                            // Scan the board and see if any cells on the diagonal path are not done yet. All cells on
+                            // the diagonal must be done before the execution can stop.
                             let mut has_completed_lolo_path = true;
                             for (rc, cell) in simgrid.enumerate_row_col() {
                                 if !Board::is_on_lolo_path(&simgrid, &path_rc, &rc) {
@@ -479,8 +585,13 @@ impl Board {
                         }
                     }
                 }
-                Move::MarkPath(target_rc) => match state {
+                Move::MarkPath(_) => match state {
                     BoardState::GatheringKeyword(keyword, keyword_moves) => {
+                        // Mark Path is used for conductors. The player is expected to mark whenever going to a
+                        // conductor that will redirect outside simple straight-line connectivity.
+
+                        // If the cell being marked is not connected to the previous cell in the path, then it can't be
+                        // used as part of this path.
                         if !Board::is_connected_for_keyword(&simgrid, &keyword_moves, target_rc) {
                             log!("{:?} not connected to previous keyword move", target_rc);
                             return Some(mv_num);
@@ -499,14 +610,16 @@ impl Board {
                         return Some(mv_num);
                     }
                 },
-                Move::ChangeLetter(target_rc, letter) => match state {
+                Move::ChangeLetter(_, letter) => match state {
                     BoardState::GatheringKeyword(_, _)
                     | BoardState::ExecutingLOK
                     | BoardState::ExecutingTLAK(_)
                     | BoardState::ExecutingTA(_)
                     | BoardState::ExecutingLOLO(_) => {
+                        // The player is permitted to change the letter of any cell at any time, provided that cell had
+                        // a wildcard at some point in the past.
                         if target.was_ever_wildcard() {
-                            if !simgrid[target_rc].change_letter(*letter) {
+                            if !simgrid[target_rc].try_change_letter(*letter) {
                                 log!("Not allowed to change letter to '{}'", letter);
                                 return Some(mv_num);
                             }
@@ -521,6 +634,7 @@ impl Board {
                         }
                     }
                     BoardState::ExecutingBE => {
+                        // BE requires the target cell to be blank.
                         if !target.is_blank() {
                             log!(
                                 "Not allowed to change letter in non-blank cell: {:?}",
@@ -529,7 +643,7 @@ impl Board {
                             return Some(mv_num);
                         }
 
-                        if !simgrid[target_rc].change_letter(*letter) {
+                        if !simgrid[target_rc].try_change_letter(*letter) {
                             log!("Not allowed to change letter to '{}'", letter);
                             return Some(mv_num);
                         }
@@ -1345,22 +1459,29 @@ mod tests {
 
     #[test]
     fn be_invalid_underscore() {
-        let mut board = Board::new("BELOK_").unwrap();
+        let mut board = Board::new("BEBEQOK_").unwrap();
 
         // BE
         board.blacken(0, 0);
         board.blacken(0, 1);
 
-        // Exec BE, but dash not allowed
-        board.change_letter(0, 5, '_');
+        // Exec BE, but underscore not allowed
+        board.change_letter(0, 4, BLANK_LETTER);
 
-        // LOK
+        // BE
         board.blacken(0, 2);
         board.blacken(0, 3);
+
+        // Exec BE
+        board.change_letter(0, 4, 'L');
+
+        // LOK
         board.blacken(0, 4);
+        board.blacken(0, 5);
+        board.blacken(0, 6);
 
         // Exec LOK
-        board.blacken(0, 5);
+        board.blacken(0, 7);
         assert_eq!(board.commit_and_check_solution(), Some(2));
     }
 
@@ -1373,7 +1494,7 @@ mod tests {
         board.blacken(0, 1);
 
         // Exec BE, but dash not allowed
-        board.change_letter(0, 3, '-');
+        board.change_letter(0, 3, GAP_LETTER);
 
         // LOK
         board.blacken(0, 2);
@@ -1423,7 +1544,7 @@ mod tests {
         // LOK
         board.blacken(0, 0);
         board.blacken(0, 1);
-        board.change_letter(0, 2, 'X');
+        board.change_letter(0, 2, CONDUCTOR_LETTER);
         board.mark_path(0, 2);
         board.blacken(1, 2);
 
