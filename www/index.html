@@ -1,17 +1,17 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1" charset="utf-8" />
     <title>Lok-wasm</title>
     <style type="text/css">
-    body {
+    body, input, textarea {
         font-family: "Consolas", monospace;
-        font-size: 16px;
+        font-size: medium;
     }
 
     #puzzle_entry {
         font-family: "Consolas", monospace;
-        font-size: 16px;
+        font-size: medium;
     }
 
     td {
@@ -67,7 +67,7 @@
         <li>CTRL-m - change mode</li>
     </ul>
     <form id="render_form">
-<textarea id="puzzle_entry" rows="10" cols="20"></textarea>
+    <textarea id="puzzle_entry" rows="10" cols="20"></textarea>
     <input type="submit" id="render_puzzle" value="Render!" />
     </form>
     <hr />
