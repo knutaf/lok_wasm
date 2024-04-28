@@ -244,7 +244,7 @@ pub struct Board {
 #[wasm_bindgen]
 impl Board {
     /// Constructs a new board, given player input.
-    pub fn new(contents: &str) -> Option<Board> {
+    pub fn new(contents: &str) -> Result<Board, String> {
         log!("puzzle:\n{}", contents);
 
         // First determine the size of the board. It is inferred from the number of lines and the length of each line.
@@ -256,13 +256,12 @@ impl Board {
             }
 
             if line.len() != cols {
-                log!(
+                return Err(format!(
                     "Row {} had {} cols, but needed to have {} cols to match the rows above it!",
                     rows,
                     line.len(),
                     cols
-                );
-                return None;
+                ));
             }
 
             rows += 1;
@@ -285,7 +284,7 @@ impl Board {
             row += 1;
         }
 
-        Some(board)
+        Ok(board)
     }
 
     /// Gets the number of columns in the board.
