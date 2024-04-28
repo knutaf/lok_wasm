@@ -677,6 +677,7 @@ impl Board {
 }
 
 impl Board {
+    /// Returns the latest state of the board according to the moves that the player has made.
     fn get_latest(&self) -> &BoardGrid {
         if let Some(step) = self.moves.last() {
             &step.grid
@@ -685,22 +686,29 @@ impl Board {
         }
     }
 
+    /// Returns if two locations are considered adjacent to each other, according to the game's adjacency rules.
     fn is_adjacent(grid: &BoardGrid, rc1: &RC, rc2: &RC) -> bool {
+        // A cell is not adjacent to itself.
         if rc1 == rc2 {
             return false;
         }
 
-        // Must be either vertically or horizontally aligned
+        // Must be either vertically or horizontally aligned.
         if rc1.0 != rc2.0 && rc1.1 != rc2.1 {
             return false;
         }
 
+        // Create deltas to walk from one cell to the other. These can each be +1, 0, or -1.
         let row_walk_inc: isize = rc2.0.cmp(&rc1.0) as i8 as isize;
         let col_walk_inc: isize = rc2.1.cmp(&rc1.1) as i8 as isize;
         assert!(row_walk_inc == 0 || col_walk_inc == 0);
+        assert!(row_walk_inc >= -1);
+        assert!(col_walk_inc >= -1);
+        assert!(row_walk_inc <= 1);
+        assert!(col_walk_inc <= 1);
 
         log!(
-            "Walk from {:?} to {:?}, using ({}, {})",
+            "Walk from {:?} to {:?}, using direction ({}, {})",
             rc1,
             rc2,
             row_walk_inc,
@@ -709,20 +717,26 @@ impl Board {
 
         let mut current_rc = rc1.clone();
         loop {
+            // Shouldn't be walking out of bounds negative.
             assert!(row_walk_inc >= 0 || current_rc.0 > 0);
             assert!(col_walk_inc >= 0 || current_rc.1 > 0);
+
             current_rc = RC(
                 current_rc.0.checked_add_signed(row_walk_inc).unwrap(),
                 current_rc.1.checked_add_signed(col_walk_inc).unwrap(),
             );
 
+            // Shouldn't be walking out of bounds positive.
             assert!(current_rc.0 < grid.height());
             assert!(current_rc.1 < grid.width());
 
+            // Walking has reached the end position and has found it, therefore they are adjacent.
             if current_rc == *rc2 {
                 return true;
             }
 
+            // This cell along the path from rc1 to rc2 is not traversible, so rc1 and rc2 are not adjacent. Generally
+            // this happens because the cell is not blackened or a gap.
             let current = grid[&current_rc];
             if !current.is_traversible_for_adjacency() {
                 log!(
@@ -734,28 +748,33 @@ impl Board {
         }
     }
 
+    /// Returns if two cells are connected for the puroses of gathering a keyword. Note that this is somewhat different
+    /// than checking adjacency.
     fn is_connected_for_keyword(
         grid: &BoardGrid,
         moves: &Vec<Move>,
         rc2: &RC, // other parts considered will be rc1 (prior move) and rc0 (2 prior moves)
     ) -> bool {
-        // If this is the first move, then it is always accepted.
+        // If rc2 is the first position being considered for this path, then it's always considered connected. Later
+        // positions will have to be considered for connectivity to this one.
         if moves.len() == 0 {
             return true;
         }
 
         let rc1 = moves.last().unwrap().get_rc();
 
+        // A location is never connected to itself.
         if rc1 == rc2 {
             return false;
         }
 
-        // Must be either vertically or horizontally aligned
+        // Must be either vertically or horizontally aligned.
         if rc2.0 != rc1.0 && rc2.1 != rc1.1 {
             return false;
         }
 
-        // By default, just walk between the previous step and the current step.
+        // Figure out the direction to walk in between the previous step and the current step, assuming one of the later
+        // checks doesn't invalidate this direction.
         let mut row_walk_inc = rc2.0.cmp(&rc1.0) as i8 as isize;
         let mut col_walk_inc = rc2.1.cmp(&rc1.1) as i8 as isize;
 
@@ -764,12 +783,17 @@ impl Board {
             let rc0 = moves.get(moves.len() - 2).unwrap().get_rc();
             assert!(rc1.0 == rc0.0 || rc1.1 == rc0.1);
 
+            // The player is trying to walk from rc0 -> rc1 -> rc2. If rc1 is a conductor, then the player can change
+            // direction in the rc1 -> rc2 leg. However, conductors don't allow doubling back and going from rc1 back
+            // towards rc0.
             if grid[rc1].is_conductor() {
+                // Determine which direction would be backtracking from rc1 towards rc0.
                 let (backtracking_row_walk_inc, backtracking_col_walk_inc) = (
                     rc0.0.cmp(&rc1.0) as i8 as isize,
                     rc0.1.cmp(&rc1.1) as i8 as isize,
                 );
 
+                // Don't allow backtracking.
                 if backtracking_row_walk_inc == row_walk_inc
                     && backtracking_col_walk_inc == col_walk_inc
                 {
@@ -783,22 +807,28 @@ impl Board {
                 col_walk_inc = rc1.1.cmp(&rc0.1) as i8 as isize;
             }
         } else {
-            // Cannot have a conductor accepted as the first move.
+            // There are no keywords that would allow a conductor as the first move.
             assert!(!grid[rc1].is_conductor());
         }
 
         assert!(row_walk_inc == 0 || col_walk_inc == 0);
+        assert!(row_walk_inc >= -1);
+        assert!(col_walk_inc >= -1);
+        assert!(row_walk_inc <= 1);
+        assert!(col_walk_inc <= 1);
 
         log!(
-            "Walk from {:?} to {:?}, using ({}, {})",
+            "Walk from {:?} to {:?}, using direction ({}, {})",
             rc1,
             rc2,
             row_walk_inc,
             col_walk_inc
         );
 
+        // Try to walk from rc1 towards rc2.
         let mut current_rc = rc1.clone();
         loop {
+            // Don't allow traversing out of bounds negative.
             if row_walk_inc < 0 && current_rc.0 == 0 {
                 log!(
                     "Traversed out of bounds to negative row from {:?}",
@@ -807,6 +837,7 @@ impl Board {
                 return false;
             }
 
+            // Don't allow traversing out of bounds negative.
             if col_walk_inc < 0 && current_rc.1 == 0 {
                 log!(
                     "Traversed out of bounds to negative col from {:?}",
@@ -820,20 +851,25 @@ impl Board {
                 current_rc.1.checked_add_signed(col_walk_inc).unwrap(),
             );
 
+            // Don't allow traversing out of bounds positive.
             if current_rc.0 >= grid.height() {
                 log!("Traversed beyond row bounds from {:?}", current_rc);
                 return false;
             }
 
+            // Don't allow traversing out of bounds positive.
             if current_rc.1 >= grid.width() {
                 log!("Traversed beyond col bounds from {:?}", current_rc);
                 return false;
             }
 
+            // The traversal from rc1 to rc2 has succeeded and these two positions are considered connected.
             if current_rc == *rc2 {
                 return true;
             }
 
+            // Check if the current cell in the traveral is considered connected. Usually it's not when it's a cell with
+            // a valid letter in it.
             let current = grid[&current_rc];
             if !current.is_traversible_for_keyword() {
                 log!(
@@ -845,6 +881,7 @@ impl Board {
         }
     }
 
+    /// Returns if a given cell is on a LOLO path (diagonal from lower-left to upper-right).
     fn is_on_lolo_path(grid: &BoardGrid, path_rc: &RC, target_rc: &RC) -> bool {
         assert!(path_rc.0 < grid.height());
         assert!(path_rc.1 < grid.width());
