@@ -5,12 +5,12 @@
     <title>Lok-wasm</title>
     <style type="text/css">
     body {
-        font-family: "Consolas";
+        font-family: "Consolas", monospace;
         font-size: 16px;
     }
 
     #puzzle_entry {
-        font-family: "Consolas";
+        font-family: "Consolas", monospace;
         font-size: 16px;
     }
 
@@ -59,10 +59,16 @@
     </style>
   </head>
   <body>
-    <p>Press CTRL-z to undo. Press CTRL-Enter to set new puzzle after text entry. Press CTRL-m to switch modes.</p>
-    <form id="generate_form">
+    <p>This is a puzzle checker for the puzzle game <a href="https://letibus.itch.io/lok">LOK</a>. You can enter the puzzle below and hit "Render!" to render it as a grid. Then you can click on the grid and change modes with the radio button below to input a solution. Once the full solution has been entered, you can click "Check!" to see if the solution is right. If the solution is incorrect, by design this page won't tell you why, in order to not reveal puzzle too much about the puzzle mechanics; the fun is in figuring out the mechanics!</p>
+
+    <ul>
+        <li>CTRL-Enter - render the puzzle that was entered in text entry box.</li>
+        <li>ALT-z - undo the latest move</li>
+        <li>CTRL-m - change mode</li>
+    </ul>
+    <form id="render_form">
 <textarea id="puzzle_entry" rows="10" cols="20"></textarea>
-    <input type="submit" id="generate_puzzle" value="Generate!" />
+    <input type="submit" id="render_puzzle" value="Render!" />
     </form>
     <hr />
     <div id="board_display"><table style="display: none"></table></div>

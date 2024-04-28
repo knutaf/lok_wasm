@@ -3,7 +3,7 @@ import { Board, BoardCell } from "lok-wasm";
 window.addEventListener("hashchange", onHashChange);
 window.addEventListener("keydown", onKeyDown);
 document.getElementById("check_solution").addEventListener("click", onClickCheckSolution);
-document.getElementById("generate_form").addEventListener("submit", onGenerateSubmit);
+document.getElementById("render_form").addEventListener("submit", onRenderSubmit);
 document.getElementById("undo").addEventListener("click", onClickUndo);
 
 {
@@ -42,9 +42,9 @@ function onHashChange() {
 
 function onKeyDown(evt) {
     switch (evt.key) {
-        // CTRL-z to undo.
+        // ALT-z to undo.
         case "z": {
-            if (evt.ctrlKey) {
+            if (evt.altKey) {
                 onClickUndo();
             }
             break;
@@ -88,21 +88,26 @@ function onModeChange(evt) {
 
 function setPuzzle() {
     const puzzle = document.getElementById("puzzle_entry").value;
-    g_board = Board.new(puzzle);
-    renderBoard();
+    try {
+        g_board = Board.new(puzzle);
+        renderBoard();
 
-    const resultDisplay = document.getElementById("result_display");
-    resultDisplay.className = null;
-    resultDisplay.textContent = "Unsolved";
+        const resultDisplay = document.getElementById("result_display");
+        resultDisplay.className = null;
+        resultDisplay.textContent = "Unsolved";
 
-    var newHash = "#" + encodeURIComponent(puzzle);
-    if (window.location.hash != newHash) {
-        console.log("setting hash to " + newHash);
-        window.location.hash = newHash;
+        var newHash = "#" + encodeURIComponent(puzzle);
+        if (window.location.hash != newHash) {
+            console.log("setting hash to " + newHash);
+            window.location.hash = newHash;
+        }
+    }
+    catch (ex) {
+        alert("Error rendering puzzle: " + ex);
     }
 }
 
-function onGenerateSubmit(evt) {
+function onRenderSubmit(evt) {
     setPuzzle();
     return false;
 }
