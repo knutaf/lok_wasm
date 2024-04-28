@@ -539,19 +539,19 @@ impl Board {
                             log!("Cannot blacken while executing BE");
                             return Some(mv_num);
                         }
-                        BoardState::ExecutingLOLO(path_rc_opt) => {
+                        BoardState::ExecutingLOLO(anchor_rc_opt) => {
                             // For executing LOLO, the player is expected to choose one non-blackened cell and then go
                             // on to blacken all cells along that diagonal, from bottom-left to upper-right. Order of
                             // blackening doesn't matter.
-                            let path_rc = if let Some(path_rc) = path_rc_opt {
-                                if !Board::is_on_lolo_path(&simgrid, &path_rc, target_rc) {
+                            let anchor_rc = if let Some(anchor_rc) = anchor_rc_opt {
+                                if !Board::is_on_lolo_path(&simgrid, &anchor_rc, target_rc) {
                                     log!("{:?} is not on LOLO path", target_rc);
                                     return Some(mv_num);
                                 }
 
                                 assert!(!target.is_blackened());
                                 simgrid[target_rc].blacken();
-                                path_rc.clone()
+                                anchor_rc.clone()
                             } else {
                                 assert!(!target.is_blackened());
                                 simgrid[target_rc].blacken();
@@ -562,7 +562,7 @@ impl Board {
                             // the diagonal must be done before the execution can stop.
                             let mut has_completed_lolo_path = true;
                             for (rc, cell) in simgrid.enumerate_row_col() {
-                                if !Board::is_on_lolo_path(&simgrid, &path_rc, &rc) {
+                                if !Board::is_on_lolo_path(&simgrid, &anchor_rc, &rc) {
                                     continue;
                                 }
 
@@ -570,7 +570,7 @@ impl Board {
                                     log!(
                                         "{:?} on LOLO path including {:?} is still not done",
                                         rc,
-                                        path_rc
+                                        anchor_rc
                                     );
                                     has_completed_lolo_path = false;
                                     break;
@@ -580,7 +580,7 @@ impl Board {
                             if has_completed_lolo_path {
                                 BoardState::idle()
                             } else {
-                                BoardState::ExecutingLOLO(Some(path_rc))
+                                BoardState::ExecutingLOLO(Some(anchor_rc))
                             }
                         }
                     }
@@ -882,33 +882,40 @@ impl Board {
     }
 
     /// Returns if a given cell is on a LOLO path (diagonal from lower-left to upper-right).
-    fn is_on_lolo_path(grid: &BoardGrid, path_rc: &RC, target_rc: &RC) -> bool {
-        assert!(path_rc.0 < grid.height());
-        assert!(path_rc.1 < grid.width());
+    fn is_on_lolo_path(grid: &BoardGrid, anchor_rc: &RC, target_rc: &RC) -> bool {
+        assert!(anchor_rc.0 < grid.height());
+        assert!(anchor_rc.1 < grid.width());
         assert!(target_rc.0 < grid.height());
         assert!(target_rc.1 < grid.width());
 
-        let (row_diff, col_diff) = if target_rc.0 > path_rc.0 {
-            // target row is higher, so target col should be lower
-            if target_rc.1 >= path_rc.1 {
+        // Compare the position that is on the path with the new one that is being checked for being on the same path.
+        let (row_diff, col_diff) = if target_rc.0 > anchor_rc.0 {
+            // target row is higher (towards lower-left of the board), so target col should be lower (towards
+            // upper-right)
+            if target_rc.1 >= anchor_rc.1 {
                 return false;
             }
 
-            (target_rc.0 - path_rc.0, path_rc.1 - target_rc.1)
-        } else if target_rc.0 < path_rc.0 {
-            // target row is lower, so col should be higher
-            if target_rc.1 <= path_rc.1 {
+            (target_rc.0 - anchor_rc.0, anchor_rc.1 - target_rc.1)
+        } else if target_rc.0 < anchor_rc.0 {
+            // target row is lower (towards upper-right of the board), so target col should be higher (towards
+            // bottom-right)
+            if target_rc.1 <= anchor_rc.1 {
                 return false;
             }
 
-            (path_rc.0 - target_rc.0, target_rc.1 - path_rc.1)
+            (anchor_rc.0 - target_rc.0, target_rc.1 - anchor_rc.1)
         } else {
+            // Row is equal, so it can't possibly be on a diagonal.
             return false;
         };
 
         assert!(row_diff != 0);
         assert!(col_diff != 0);
 
+        // We've established so far that the two cells have the right rough relationship with each other: the target is
+        // somewhere to the upper-right or lower-left of the anchor_rc. Next we have to ensure that it's properly on a
+        // diagonal, which happens when the number of rows from the anchor is the same as the number of cols from it.
         row_diff == col_diff
     }
 }
