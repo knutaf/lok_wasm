@@ -235,6 +235,47 @@ struct BoardStep {
     grid: BoardGrid,
 }
 
+#[derive(PartialEq, Debug)]
+enum MoveError {
+    AlreadyBlackened,
+    BlackenNotConnectedForKeyword,
+    PathNotConnectedForKeyword,
+    UnknownKeyword,
+    GatheringNonLetter,
+    TLAKNotAdjacent,
+    TALetterMismatch,
+    TAInvalidLetter,
+    BECannotBlacken,
+    LOLONotOnPath,
+    CannotMarkWhileExecuting,
+    CannotChangeToThisLetter,
+    CellCannotChangeLetterInThisState,
+    BECannotChangeNonBlankCell,
+    BECannotChangeToThisLetter,
+}
+
+#[derive(PartialEq, Debug)]
+enum SolutionResult {
+    /// The solution is correct.
+    Correct,
+
+    /// All moves were individually correct, but some cells were not blackened.
+    Incomplete,
+
+    /// All moves were individually correct, but the puzzle was left with a keyword not fully executed.
+    NotIdle,
+
+    /// Individual moves were correct, but a keyword was partially gathered.
+    PartialKeyword,
+
+    /// The move with the given index was illegal.
+    ErrorOnMove(usize, MoveError),
+}
+
+// Shorthand
+type SR = SolutionResult;
+type ME = MoveError;
+
 #[wasm_bindgen]
 pub struct Board {
     grid: BoardGrid,
@@ -357,321 +398,8 @@ impl Board {
         let _ = self.moves.pop();
     }
 
-    /// Evaluates the moves that have been tracked so far to see if this is a valid solution. Returns None if it is
-    /// valid, or Some(x) where x is the 0-based move number where the solution was found to be incorrect. For example,
-    /// if the very first move is wrong, it will return `Some(0)`. Also, if all moves are valid but the board either
-    /// still isn't complete at the end or isn't idle, then it returns `Some(moves.len())`.
-    pub fn commit_and_check_solution(&self) -> Option<usize> {
-        // Create a copy of the board that will be modified through the simulation and checked at each step for
-        // validity.
-        let mut simgrid = self.grid.clone();
-
-        // The simulation starts at idle.
-        let mut state = BoardState::idle();
-
-        // Iterate through all the tracked moves, checking each one for validity.
-        for (mv_num, BoardStep { mv, grid: _ }) in self.moves.iter().enumerate() {
-            log!("{:2}: state {:?}, move {:?}", mv_num, state, mv);
-
-            // `target_rc` is the location of the cell being targeted by this move. `target` is the cell itself.
-            let target_rc = mv.get_rc();
-            let target = simgrid[target_rc].clone();
-
-            // None of the currently used moves, blacken, mark path, or change letter, are valid to target a cell that
-            // is already blackened. Blackened cells can be traversed for adjacency, but that's it.
-            if target.is_blackened() {
-                log!("{:?} already blackened", target_rc);
-                return Some(mv_num);
-            }
-
-            state = match mv {
-                // Blackening a cell has two uses:
-                // 1. when gathering a keyword, it defers blackening until the entire keyword is gathered, then the
-                //    whole keyword is blackened at once.
-                // 2. when executing a keyword, the cell is blackened right away.
-                Move::Blacken(_) => {
-                    match state {
-                        // The player is expected to gather the next letter in a keyword.
-                        BoardState::GatheringKeyword(keyword, keyword_moves) => {
-                            if !Board::is_connected_for_keyword(&simgrid, &keyword_moves, target_rc)
-                            {
-                                log!("{:?} not connected to previous keyword move", target_rc);
-                                return Some(mv_num);
-                            }
-
-                            // Keywords consist of only letters.
-                            if let Some(letter) = target.get_letter() {
-                                let mut new_keyword = keyword.clone();
-                                new_keyword.push(letter);
-
-                                // Check to see if the keyword gathered so far could possibly be one of the known
-                                // keywords. If not, the solution fails here.
-                                if !KNOWN_KEYWORDS
-                                    .iter()
-                                    .any(|known_keyword| known_keyword.starts_with(&new_keyword))
-                                {
-                                    log!("{} cannot be any known keyword", new_keyword);
-                                    return Some(mv_num);
-                                }
-
-                                // So far this is a possible keyword, so accept the latest move.
-                                let mut new_keyword_moves = keyword_moves.clone();
-                                new_keyword_moves.push(mv.clone());
-
-                                // If the keyword so far matches a known keyword, then accept it and transition to the
-                                // executing state. Otherwise, continue gathering.
-                                if let Some(known_keyword) = KNOWN_KEYWORDS
-                                    .iter()
-                                    .find(|known_keyword| new_keyword == **known_keyword)
-                                {
-                                    // Have now accumulated a whole keyword. Black it out.
-                                    for mv in new_keyword_moves.iter() {
-                                        if let Move::Blacken(rc) = mv {
-                                            simgrid[rc].blacken();
-                                        }
-                                    }
-
-                                    // Transition to the "executing" state, where the next moves are expected to
-                                    // fulfill a different condition according to which keyword was just found.
-                                    match *known_keyword {
-                                        "LOK" => BoardState::ExecutingLOK,
-                                        "TLAK" => BoardState::ExecutingTLAK(None),
-                                        "TA" => BoardState::ExecutingTA(None),
-                                        "BE" => BoardState::ExecutingBE,
-                                        "LOLO" => BoardState::ExecutingLOLO(None),
-                                        _ => {
-                                            panic!("Impossible unknown keyword {}", *known_keyword)
-                                        }
-                                    }
-                                } else {
-                                    // Next state is still gathering keywords, but including the most recently gathered
-                                    // letter.
-                                    BoardState::GatheringKeyword(new_keyword, new_keyword_moves)
-                                }
-                            } else {
-                                log!("Not a letter: {}", target.get_raw());
-                                return Some(mv_num);
-                            }
-                        }
-                        BoardState::ExecutingLOK => {
-                            // For executing LOK, the player is expected to blacken exactly one cell.
-                            assert!(!target.is_blackened());
-                            simgrid[target_rc].blacken();
-                            BoardState::idle()
-                        }
-                        BoardState::ExecutingTLAK(exec_rc_opt) => {
-                            // For executing TLAK, the player is expected to blacken two adjacent cells.
-
-                            // If this is the second cell, make sure it is adjacent to the first cell.
-                            if let Some(ref last_exec_rc) = exec_rc_opt {
-                                if !Board::is_adjacent(&simgrid, &last_exec_rc, target_rc) {
-                                    log!(
-                                        "{:?} not adjacent to {:?} for TLAK blacken",
-                                        last_exec_rc,
-                                        target_rc
-                                    );
-
-                                    return Some(mv_num);
-                                }
-                            }
-
-                            assert!(!target.is_blackened());
-                            simgrid[target_rc].blacken();
-
-                            if exec_rc_opt.is_some() {
-                                BoardState::idle()
-                            } else {
-                                BoardState::ExecutingTLAK(Some(target_rc.clone()))
-                            }
-                        }
-                        BoardState::ExecutingTA(chosen_letter_opt) => {
-                            // For executing TA, the player chooses one letter and has to black out all the cells with
-                            // that letter.
-
-                            if let Some(letter) = target.get_letter_or_blank() {
-                                // If the user has chosen a letter from a previous move during this execution, make sure
-                                // the new letter being chosen matches it.
-                                if let Some(chosen_letter) = chosen_letter_opt {
-                                    if letter != chosen_letter {
-                                        log!(
-                                            "Letter {} does not match TA chosen letter {}",
-                                            letter,
-                                            chosen_letter
-                                        );
-                                        return Some(mv_num);
-                                    }
-                                } else {
-                                    log!("TA choosing letter {}", letter);
-                                }
-
-                                assert!(!target.is_blackened());
-                                simgrid[target_rc].blacken();
-
-                                // If there are any more of this chosen letter on the board, then the state is still
-                                // waiting for those to be blackened out. Otherwise, the TA is done.
-                                let mut has_completed_all_letters = true;
-                                for (rc, cell) in simgrid.enumerate_row_col() {
-                                    if cell.is_blackened() {
-                                        continue;
-                                    }
-
-                                    if let Some(cell_letter) = cell.get_letter_or_blank() {
-                                        if cell_letter == letter {
-                                            log!("{:?} is still {}", rc, letter);
-                                            has_completed_all_letters = false;
-                                            break;
-                                        }
-                                    }
-                                }
-
-                                if has_completed_all_letters {
-                                    BoardState::idle()
-                                } else {
-                                    BoardState::ExecutingTA(Some(letter))
-                                }
-                            } else {
-                                log!("Not a letter: {}", target.get_raw());
-                                return Some(mv_num);
-                            }
-                        }
-                        BoardState::ExecutingBE => {
-                            log!("Cannot blacken while executing BE");
-                            return Some(mv_num);
-                        }
-                        BoardState::ExecutingLOLO(anchor_rc_opt) => {
-                            // For executing LOLO, the player is expected to choose one non-blackened cell and then go
-                            // on to blacken all cells along that diagonal, from bottom-left to upper-right. Order of
-                            // blackening doesn't matter.
-                            let anchor_rc = if let Some(anchor_rc) = anchor_rc_opt {
-                                if !Board::is_on_lolo_path(&simgrid, &anchor_rc, target_rc) {
-                                    log!("{:?} is not on LOLO path", target_rc);
-                                    return Some(mv_num);
-                                }
-
-                                assert!(!target.is_blackened());
-                                simgrid[target_rc].blacken();
-                                anchor_rc.clone()
-                            } else {
-                                assert!(!target.is_blackened());
-                                simgrid[target_rc].blacken();
-                                target_rc.clone()
-                            };
-
-                            // Scan the board and see if any cells on the diagonal path are not done yet. All cells on
-                            // the diagonal must be done before the execution can stop.
-                            let mut has_completed_lolo_path = true;
-                            for (rc, cell) in simgrid.enumerate_row_col() {
-                                if !Board::is_on_lolo_path(&simgrid, &anchor_rc, &rc) {
-                                    continue;
-                                }
-
-                                if !cell.is_done() {
-                                    log!(
-                                        "{:?} on LOLO path including {:?} is still not done",
-                                        rc,
-                                        anchor_rc
-                                    );
-                                    has_completed_lolo_path = false;
-                                    break;
-                                }
-                            }
-
-                            if has_completed_lolo_path {
-                                BoardState::idle()
-                            } else {
-                                BoardState::ExecutingLOLO(Some(anchor_rc))
-                            }
-                        }
-                    }
-                }
-                Move::MarkPath(_) => match state {
-                    BoardState::GatheringKeyword(keyword, keyword_moves) => {
-                        // Mark Path is used for conductors. The player is expected to mark whenever going to a
-                        // conductor that will redirect outside simple straight-line connectivity.
-
-                        // If the cell being marked is not connected to the previous cell in the path, then it can't be
-                        // used as part of this path.
-                        if !Board::is_connected_for_keyword(&simgrid, &keyword_moves, target_rc) {
-                            log!("{:?} not connected to previous keyword move", target_rc);
-                            return Some(mv_num);
-                        }
-
-                        let mut new_keyword_moves = keyword_moves.clone();
-                        new_keyword_moves.push(mv.clone());
-                        BoardState::GatheringKeyword(keyword.clone(), new_keyword_moves)
-                    }
-                    BoardState::ExecutingLOK
-                    | BoardState::ExecutingTLAK(_)
-                    | BoardState::ExecutingTA(_)
-                    | BoardState::ExecutingBE
-                    | BoardState::ExecutingLOLO(_) => {
-                        log!("Cannot mark path while executing a keyword");
-                        return Some(mv_num);
-                    }
-                },
-                Move::ChangeLetter(_, letter) => match state {
-                    BoardState::GatheringKeyword(_, _)
-                    | BoardState::ExecutingLOK
-                    | BoardState::ExecutingTLAK(_)
-                    | BoardState::ExecutingTA(_)
-                    | BoardState::ExecutingLOLO(_) => {
-                        // The player is permitted to change the letter of any cell at any time, provided that cell had
-                        // a wildcard at some point in the past.
-                        if target.was_ever_wildcard() {
-                            if !simgrid[target_rc].try_change_letter(*letter) {
-                                log!("Not allowed to change letter to '{}'", letter);
-                                return Some(mv_num);
-                            }
-
-                            state
-                        } else {
-                            log!(
-                                "Not allowed to change this cell's letter in state {:?}",
-                                state
-                            );
-                            return Some(mv_num);
-                        }
-                    }
-                    BoardState::ExecutingBE => {
-                        // BE requires the target cell to be blank.
-                        if !target.is_blank() {
-                            log!(
-                                "Not allowed to change letter in non-blank cell: {:?}",
-                                target.get_letter()
-                            );
-                            return Some(mv_num);
-                        }
-
-                        if !simgrid[target_rc].try_change_letter(*letter) {
-                            log!("Not allowed to change letter to '{}'", letter);
-                            return Some(mv_num);
-                        }
-
-                        BoardState::idle()
-                    }
-                },
-            };
-        }
-
-        // Must be back in the idle state before considering the board to be done.
-        if let BoardState::GatheringKeyword(keyword, _) = state {
-            if !keyword.is_empty() {
-                log!("Partial keyword {} found. Not done.", keyword);
-                return Some(self.moves.len());
-            }
-
-            for (rc, cell) in simgrid.enumerate_row_col() {
-                if !cell.is_done() {
-                    log!("{:?} not done", rc);
-                    return Some(self.moves.len());
-                }
-            }
-        } else {
-            log!("State {:?} is not idle", state);
-            return Some(self.moves.len());
-        }
-
-        None
+    pub fn check(&self) -> bool {
+        self.check_solution() == SolutionResult::Correct
     }
 }
 
@@ -917,6 +645,325 @@ impl Board {
         // diagonal, which happens when the number of rows from the anchor is the same as the number of cols from it.
         row_diff == col_diff
     }
+
+    /// Evaluates the moves that have been tracked so far to see if this is a valid solution. Returns None if it is
+    /// valid, or Some(x) where x is the 0-based move number where the solution was found to be incorrect. For example,
+    /// if the very first move is wrong, it will return `Some(0)`. Also, if all moves are valid but the board either
+    /// still isn't complete at the end or isn't idle, then it returns `Some(moves.len())`.
+    fn check_solution(&self) -> SolutionResult {
+        // Create a copy of the board that will be modified through the simulation and checked at each step for
+        // validity.
+        let mut simgrid = self.grid.clone();
+
+        // The simulation starts at idle.
+        let mut state = BoardState::idle();
+
+        // Iterate through all the tracked moves, checking each one for validity.
+        for (mv_num, BoardStep { mv, grid: _ }) in self.moves.iter().enumerate() {
+            log!("{:2}: state {:?}, move {:?}", mv_num, state, mv);
+
+            // `target_rc` is the location of the cell being targeted by this move. `target` is the cell itself.
+            let target_rc = mv.get_rc();
+            let target = simgrid[target_rc].clone();
+
+            // None of the currently used moves, blacken, mark path, or change letter, are valid to target a cell that
+            // is already blackened. Blackened cells can be traversed for adjacency, but that's it.
+            if target.is_blackened() {
+                log!("{:?} already blackened", target_rc);
+                return SR::ErrorOnMove(mv_num, ME::AlreadyBlackened);
+            }
+
+            state = match mv {
+                // Blackening a cell has two uses:
+                // 1. when gathering a keyword, it defers blackening until the entire keyword is gathered, then the
+                //    whole keyword is blackened at once.
+                // 2. when executing a keyword, the cell is blackened right away.
+                Move::Blacken(_) => {
+                    match state {
+                        // The player is expected to gather the next letter in a keyword.
+                        BoardState::GatheringKeyword(keyword, keyword_moves) => {
+                            if !Board::is_connected_for_keyword(&simgrid, &keyword_moves, target_rc)
+                            {
+                                log!("{:?} not connected to previous keyword move", target_rc);
+                                return SR::ErrorOnMove(mv_num, ME::BlackenNotConnectedForKeyword);
+                            }
+
+                            // Keywords consist of only letters.
+                            if let Some(letter) = target.get_letter() {
+                                let mut new_keyword = keyword.clone();
+                                new_keyword.push(letter);
+
+                                // Check to see if the keyword gathered so far could possibly be one of the known
+                                // keywords. If not, the solution fails here.
+                                if !KNOWN_KEYWORDS
+                                    .iter()
+                                    .any(|known_keyword| known_keyword.starts_with(&new_keyword))
+                                {
+                                    log!("{} cannot be any known keyword", new_keyword);
+                                    return SR::ErrorOnMove(mv_num, ME::UnknownKeyword);
+                                }
+
+                                // So far this is a possible keyword, so accept the latest move.
+                                let mut new_keyword_moves = keyword_moves.clone();
+                                new_keyword_moves.push(mv.clone());
+
+                                // If the keyword so far matches a known keyword, then accept it and transition to the
+                                // executing state. Otherwise, continue gathering.
+                                if let Some(known_keyword) = KNOWN_KEYWORDS
+                                    .iter()
+                                    .find(|known_keyword| new_keyword == **known_keyword)
+                                {
+                                    // Have now accumulated a whole keyword. Black it out.
+                                    for mv in new_keyword_moves.iter() {
+                                        if let Move::Blacken(rc) = mv {
+                                            simgrid[rc].blacken();
+                                        }
+                                    }
+
+                                    // Transition to the "executing" state, where the next moves are expected to
+                                    // fulfill a different condition according to which keyword was just found.
+                                    match *known_keyword {
+                                        "LOK" => BoardState::ExecutingLOK,
+                                        "TLAK" => BoardState::ExecutingTLAK(None),
+                                        "TA" => BoardState::ExecutingTA(None),
+                                        "BE" => BoardState::ExecutingBE,
+                                        "LOLO" => BoardState::ExecutingLOLO(None),
+                                        _ => {
+                                            panic!("Impossible unknown keyword {}", *known_keyword)
+                                        }
+                                    }
+                                } else {
+                                    // Next state is still gathering keywords, but including the most recently gathered
+                                    // letter.
+                                    BoardState::GatheringKeyword(new_keyword, new_keyword_moves)
+                                }
+                            } else {
+                                log!("Not a letter: {}", target.get_raw());
+                                return SR::ErrorOnMove(mv_num, ME::GatheringNonLetter);
+                            }
+                        }
+                        BoardState::ExecutingLOK => {
+                            // For executing LOK, the player is expected to blacken exactly one cell.
+                            assert!(!target.is_blackened());
+                            simgrid[target_rc].blacken();
+                            BoardState::idle()
+                        }
+                        BoardState::ExecutingTLAK(exec_rc_opt) => {
+                            // For executing TLAK, the player is expected to blacken two adjacent cells.
+
+                            // If this is the second cell, make sure it is adjacent to the first cell.
+                            if let Some(ref last_exec_rc) = exec_rc_opt {
+                                if !Board::is_adjacent(&simgrid, &last_exec_rc, target_rc) {
+                                    log!(
+                                        "{:?} not adjacent to {:?} for TLAK blacken",
+                                        last_exec_rc,
+                                        target_rc
+                                    );
+
+                                    return SR::ErrorOnMove(mv_num, ME::TLAKNotAdjacent);
+                                }
+                            }
+
+                            assert!(!target.is_blackened());
+                            simgrid[target_rc].blacken();
+
+                            if exec_rc_opt.is_some() {
+                                BoardState::idle()
+                            } else {
+                                BoardState::ExecutingTLAK(Some(target_rc.clone()))
+                            }
+                        }
+                        BoardState::ExecutingTA(chosen_letter_opt) => {
+                            // For executing TA, the player chooses one letter and has to black out all the cells with
+                            // that letter.
+
+                            if let Some(letter) = target.get_letter_or_blank() {
+                                // If the user has chosen a letter from a previous move during this execution, make sure
+                                // the new letter being chosen matches it.
+                                if let Some(chosen_letter) = chosen_letter_opt {
+                                    if letter != chosen_letter {
+                                        log!(
+                                            "Letter {} does not match TA chosen letter {}",
+                                            letter,
+                                            chosen_letter
+                                        );
+
+                                        return SR::ErrorOnMove(mv_num, ME::TALetterMismatch);
+                                    }
+                                } else {
+                                    log!("TA choosing letter {}", letter);
+                                }
+
+                                assert!(!target.is_blackened());
+                                simgrid[target_rc].blacken();
+
+                                // If there are any more of this chosen letter on the board, then the state is still
+                                // waiting for those to be blackened out. Otherwise, the TA is done.
+                                let mut has_completed_all_letters = true;
+                                for (rc, cell) in simgrid.enumerate_row_col() {
+                                    if cell.is_blackened() {
+                                        continue;
+                                    }
+
+                                    if let Some(cell_letter) = cell.get_letter_or_blank() {
+                                        if cell_letter == letter {
+                                            log!("{:?} is still {}", rc, letter);
+                                            has_completed_all_letters = false;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if has_completed_all_letters {
+                                    BoardState::idle()
+                                } else {
+                                    BoardState::ExecutingTA(Some(letter))
+                                }
+                            } else {
+                                log!("Not a letter: {}", target.get_raw());
+                                return SR::ErrorOnMove(mv_num, ME::TAInvalidLetter);
+                            }
+                        }
+                        BoardState::ExecutingBE => {
+                            log!("Cannot blacken while executing BE");
+                            return SR::ErrorOnMove(mv_num, ME::BECannotBlacken);
+                        }
+                        BoardState::ExecutingLOLO(anchor_rc_opt) => {
+                            // For executing LOLO, the player is expected to choose one non-blackened cell and then go
+                            // on to blacken all cells along that diagonal, from bottom-left to upper-right. Order of
+                            // blackening doesn't matter.
+                            let anchor_rc = if let Some(anchor_rc) = anchor_rc_opt {
+                                if !Board::is_on_lolo_path(&simgrid, &anchor_rc, target_rc) {
+                                    log!("{:?} is not on LOLO path", target_rc);
+                                    return SR::ErrorOnMove(mv_num, ME::LOLONotOnPath);
+                                }
+
+                                assert!(!target.is_blackened());
+                                simgrid[target_rc].blacken();
+                                anchor_rc.clone()
+                            } else {
+                                assert!(!target.is_blackened());
+                                simgrid[target_rc].blacken();
+                                target_rc.clone()
+                            };
+
+                            // Scan the board and see if any cells on the diagonal path are not done yet. All cells on
+                            // the diagonal must be done before the execution can stop.
+                            let mut has_completed_lolo_path = true;
+                            for (rc, cell) in simgrid.enumerate_row_col() {
+                                if !Board::is_on_lolo_path(&simgrid, &anchor_rc, &rc) {
+                                    continue;
+                                }
+
+                                if !cell.is_done() {
+                                    log!(
+                                        "{:?} on LOLO path including {:?} is still not done",
+                                        rc,
+                                        anchor_rc
+                                    );
+                                    has_completed_lolo_path = false;
+                                    break;
+                                }
+                            }
+
+                            if has_completed_lolo_path {
+                                BoardState::idle()
+                            } else {
+                                BoardState::ExecutingLOLO(Some(anchor_rc))
+                            }
+                        }
+                    }
+                }
+                Move::MarkPath(_) => match state {
+                    BoardState::GatheringKeyword(keyword, keyword_moves) => {
+                        // Mark Path is used for conductors. The player is expected to mark whenever going to a
+                        // conductor that will redirect outside simple straight-line connectivity.
+
+                        // If the cell being marked is not connected to the previous cell in the path, then it can't be
+                        // used as part of this path.
+                        if !Board::is_connected_for_keyword(&simgrid, &keyword_moves, target_rc) {
+                            log!("{:?} not connected to previous keyword move", target_rc);
+                            return SR::ErrorOnMove(mv_num, ME::PathNotConnectedForKeyword);
+                        }
+
+                        let mut new_keyword_moves = keyword_moves.clone();
+                        new_keyword_moves.push(mv.clone());
+                        BoardState::GatheringKeyword(keyword.clone(), new_keyword_moves)
+                    }
+                    BoardState::ExecutingLOK
+                    | BoardState::ExecutingTLAK(_)
+                    | BoardState::ExecutingTA(_)
+                    | BoardState::ExecutingBE
+                    | BoardState::ExecutingLOLO(_) => {
+                        log!("Cannot mark path while executing a keyword");
+                        return SR::ErrorOnMove(mv_num, ME::CannotMarkWhileExecuting);
+                    }
+                },
+                Move::ChangeLetter(_, letter) => match state {
+                    BoardState::GatheringKeyword(_, _)
+                    | BoardState::ExecutingLOK
+                    | BoardState::ExecutingTLAK(_)
+                    | BoardState::ExecutingTA(_)
+                    | BoardState::ExecutingLOLO(_) => {
+                        // The player is permitted to change the letter of any cell at any time, provided that cell had
+                        // a wildcard at some point in the past.
+                        if target.was_ever_wildcard() {
+                            if !simgrid[target_rc].try_change_letter(*letter) {
+                                log!("Not allowed to change letter to '{}'", letter);
+                                return SR::ErrorOnMove(mv_num, ME::CannotChangeToThisLetter);
+                            }
+
+                            state
+                        } else {
+                            log!(
+                                "Not allowed to change this cell's letter in state {:?}",
+                                state
+                            );
+                            return SR::ErrorOnMove(mv_num, ME::CellCannotChangeLetterInThisState);
+                        }
+                    }
+                    BoardState::ExecutingBE => {
+                        // BE requires the target cell to be blank.
+                        if !target.is_blank() {
+                            log!(
+                                "Not allowed to change letter in non-blank cell: {:?}",
+                                target.get_letter()
+                            );
+                            return SR::ErrorOnMove(mv_num, ME::BECannotChangeNonBlankCell);
+                        }
+
+                        if *letter == BLANK_LETTER || !simgrid[target_rc].try_change_letter(*letter)
+                        {
+                            log!("Not allowed to change letter to '{}'", letter);
+                            return SR::ErrorOnMove(mv_num, ME::BECannotChangeToThisLetter);
+                        }
+
+                        BoardState::idle()
+                    }
+                },
+            };
+        }
+
+        // Must be back in the idle state before considering the board to be done.
+        if let BoardState::GatheringKeyword(keyword, _) = state {
+            if !keyword.is_empty() {
+                log!("Partial keyword {} found. Not done.", keyword);
+                return SR::PartialKeyword;
+            }
+
+            for (rc, cell) in simgrid.enumerate_row_col() {
+                if !cell.is_done() {
+                    log!("{:?} not done", rc);
+                    return SR::Incomplete;
+                }
+            }
+        } else {
+            log!("State {:?} is not idle", state);
+            return SR::NotIdle;
+        }
+
+        SR::Correct
+    }
 }
 
 #[cfg(test)]
@@ -930,7 +977,7 @@ mod tests {
         board.blacken(0, 1);
         board.blacken(0, 2);
         board.blacken(0, 3);
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
@@ -940,14 +987,14 @@ mod tests {
         board.blacken(0, 1);
         board.blacken(0, 2);
         board.blacken(0, 3);
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
     fn partial_keyword() {
         let mut board = Board::new("L").unwrap();
         board.blacken(0, 0);
-        assert_eq!(board.commit_and_check_solution(), Some(1));
+        assert_eq!(board.check_solution(), SR::PartialKeyword);
     }
 
     #[test]
@@ -957,7 +1004,7 @@ mod tests {
         board.blacken(0, 1);
         board.blacken(0, 3);
         board.blacken(0, 5);
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
@@ -972,7 +1019,7 @@ mod tests {
         board.blacken(0, 1);
         board.blacken(0, 3);
         board.blacken(0, 7);
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
@@ -981,7 +1028,7 @@ mod tests {
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(0, 2);
-        assert_eq!(board.commit_and_check_solution(), Some(3));
+        assert_eq!(board.check_solution(), SR::NotIdle);
     }
 
     #[test]
@@ -991,7 +1038,7 @@ mod tests {
         board.blacken(0, 1);
         board.blacken(0, 2);
         board.blacken(0, 3);
-        assert_eq!(board.commit_and_check_solution(), Some(4));
+        assert_eq!(board.check_solution(), SR::Incomplete);
     }
 
     #[test]
@@ -1001,7 +1048,10 @@ mod tests {
         board.blacken(0, 2);
         board.blacken(0, 1);
         board.blacken(0, 3);
-        assert_eq!(board.commit_and_check_solution(), Some(1));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(1, ME::BlackenNotConnectedForKeyword)
+        );
     }
 
     #[test]
@@ -1011,7 +1061,10 @@ mod tests {
         board.blacken(0, 2);
         board.blacken(0, 1);
         board.blacken(0, 3);
-        assert_eq!(board.commit_and_check_solution(), Some(1));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(1, ME::BlackenNotConnectedForKeyword)
+        );
     }
 
     #[test]
@@ -1021,7 +1074,10 @@ mod tests {
         board.blacken(0, 1);
         board.blacken(0, 0);
         board.blacken(0, 3);
-        assert_eq!(board.commit_and_check_solution(), Some(0));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(0, ME::UnknownKeyword)
+        );
     }
 
     #[test]
@@ -1039,7 +1095,7 @@ mod tests {
         board.blacken(1, 1);
         board.blacken(1, 2);
         board.blacken(0, 3);
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
@@ -1057,7 +1113,10 @@ mod tests {
         board.blacken(0, 1);
         board.blacken(0, 2);
         board.blacken(0, 3);
-        assert_eq!(board.commit_and_check_solution(), Some(1));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(1, ME::BlackenNotConnectedForKeyword)
+        );
     }
 
     #[test]
@@ -1073,7 +1132,10 @@ mod tests {
         board.blacken(1, 0);
         board.blacken(1, 1);
 
-        assert_eq!(board.commit_and_check_solution(), Some(2));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(2, ME::BlackenNotConnectedForKeyword)
+        );
     }
 
     #[test]
@@ -1084,7 +1146,10 @@ mod tests {
         board.blacken(0, 2);
         board.mark_path(0, 3);
         board.blacken(0, 3);
-        assert_eq!(board.commit_and_check_solution(), Some(3));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(3, ME::CannotMarkWhileExecuting)
+        );
     }
 
     #[test]
@@ -1095,7 +1160,10 @@ mod tests {
         board.blacken(0, 2);
         board.change_letter(0, 3, 'Q');
         board.blacken(0, 3);
-        assert_eq!(board.commit_and_check_solution(), Some(3));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(3, ME::CellCannotChangeLetterInThisState)
+        );
     }
 
     #[test]
@@ -1107,7 +1175,7 @@ mod tests {
         board.blacken(0, 3);
         board.blacken(0, 4);
         board.blacken(0, 5);
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
@@ -1117,7 +1185,7 @@ mod tests {
         board.blacken(0, 1);
         board.blacken(0, 2);
         board.blacken(0, 3);
-        assert_eq!(board.commit_and_check_solution(), Some(4));
+        assert_eq!(board.check_solution(), SR::NotIdle);
     }
 
     #[test]
@@ -1128,7 +1196,7 @@ mod tests {
         board.blacken(0, 2);
         board.blacken(0, 3);
         board.blacken(0, 4);
-        assert_eq!(board.commit_and_check_solution(), Some(5));
+        assert_eq!(board.check_solution(), SR::NotIdle);
     }
 
     #[test]
@@ -1140,7 +1208,10 @@ mod tests {
         board.blacken(0, 3);
         board.blacken(0, 4);
         board.blacken(0, 5);
-        assert_eq!(board.commit_and_check_solution(), Some(3));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(3, ME::UnknownKeyword)
+        );
     }
 
     #[test]
@@ -1152,7 +1223,7 @@ mod tests {
         board.blacken(0, 3);
         board.blacken(0, 4);
         board.blacken(0, 5);
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
@@ -1165,7 +1236,10 @@ mod tests {
         board.blacken(0, 4);
         board.mark_path(0, 5);
         board.blacken(0, 5);
-        assert_eq!(board.commit_and_check_solution(), Some(5));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(5, ME::CannotMarkWhileExecuting)
+        );
     }
 
     #[test]
@@ -1178,7 +1252,10 @@ mod tests {
         board.blacken(0, 4);
         board.change_letter(0, 5, 'Q');
         board.blacken(0, 5);
-        assert_eq!(board.commit_and_check_solution(), Some(5));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(5, ME::CellCannotChangeLetterInThisState)
+        );
     }
 
     #[test]
@@ -1192,7 +1269,7 @@ mod tests {
         board.blacken(0, 1);
         board.blacken(1, 0);
         board.blacken(1, 2);
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
@@ -1204,9 +1281,15 @@ mod tests {
         .unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
+
+        // The first one completes the TA because there's only one cell with this letter. Second one attempts to gather
+        // a new keyword, but doesn't match any.
         board.blacken(1, 0);
         board.blacken(1, 1);
-        assert_eq!(board.commit_and_check_solution(), Some(3));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(3, ME::UnknownKeyword)
+        );
     }
 
     #[test]
@@ -1216,7 +1299,7 @@ mod tests {
         board.blacken(0, 1);
         board.blacken(0, 2);
         board.blacken(0, 3);
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
@@ -1224,7 +1307,7 @@ mod tests {
         let mut board = Board::new("TA--").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
-        assert_eq!(board.commit_and_check_solution(), Some(2));
+        assert_eq!(board.check_solution(), SR::NotIdle);
     }
 
     #[test]
@@ -1237,9 +1320,12 @@ mod tests {
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.blacken(1, 0);
-        board.mark_path(1, 0);
+        board.mark_path(1, 2);
         board.blacken(1, 2);
-        assert_eq!(board.commit_and_check_solution(), Some(3));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(3, ME::CannotMarkWhileExecuting)
+        );
     }
 
     #[test]
@@ -1254,7 +1340,10 @@ mod tests {
         board.change_letter(1, 0, 'Q');
         board.blacken(1, 0);
         board.blacken(1, 2);
-        assert_eq!(board.commit_and_check_solution(), Some(2));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(2, ME::CellCannotChangeLetterInThisState)
+        );
     }
 
     #[test]
@@ -1292,7 +1381,7 @@ mod tests {
         board.blacken(2, 1);
         board.blacken(2, 3);
 
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
@@ -1306,7 +1395,7 @@ mod tests {
         // Exec TA
         board.blacken(0, 1);
 
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
@@ -1343,11 +1432,11 @@ mod tests {
         board.blacken(1, 2);
         board.blacken(2, 2);
 
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
-    fn x_incorrect_reversal() {
+    fn x_incorrect_reversal_down_then_up() {
         let mut board = Board::new(
             "_-K\n\
              LOX\n\
@@ -1366,7 +1455,88 @@ mod tests {
         // Exec LOK
         board.blacken(0, 0);
 
-        assert_eq!(board.commit_and_check_solution(), Some(4));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(4, ME::BlackenNotConnectedForKeyword)
+        );
+    }
+
+    #[test]
+    fn x_incorrect_reversal_up_then_down() {
+        let mut board = Board::new(
+            "_-X\n\
+             LOX\n\
+             --K",
+        )
+        .unwrap();
+
+        board.blacken(1, 0);
+        board.blacken(1, 1);
+        board.mark_path(1, 2);
+        board.mark_path(0, 2);
+
+        // Reversal not allowed
+        board.blacken(2, 2);
+
+        // Exec LOK
+        board.blacken(0, 0);
+
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(4, ME::BlackenNotConnectedForKeyword)
+        );
+    }
+
+    #[test]
+    fn x_incorrect_reversal_right_then_left() {
+        let mut board = Board::new(
+            "-L_\n\
+             -O-\n\
+             KXX",
+        )
+        .unwrap();
+
+        board.blacken(0, 1);
+        board.blacken(1, 1);
+        board.mark_path(2, 1);
+        board.mark_path(2, 2);
+
+        // Reversal not allowed
+        board.blacken(2, 0);
+
+        // Exec LOK
+        board.blacken(0, 0);
+
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(4, ME::BlackenNotConnectedForKeyword)
+        );
+    }
+
+    #[test]
+    fn x_incorrect_reversal_left_then_right() {
+        let mut board = Board::new(
+            "-L_\n\
+             -O-\n\
+             XXK",
+        )
+        .unwrap();
+
+        board.blacken(0, 1);
+        board.blacken(1, 1);
+        board.mark_path(2, 1);
+        board.mark_path(2, 0);
+
+        // Reversal not allowed
+        board.blacken(2, 2);
+
+        // Exec LOK
+        board.blacken(0, 0);
+
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(4, ME::BlackenNotConnectedForKeyword)
+        );
     }
 
     #[test]
@@ -1391,7 +1561,10 @@ mod tests {
         // Exec LOK
         board.blacken(0, 5);
 
-        assert_eq!(board.commit_and_check_solution(), Some(5));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(5, ME::TLAKNotAdjacent)
+        );
     }
 
     #[test]
@@ -1411,7 +1584,7 @@ mod tests {
 
         // Exec TA
         board.blacken(0, 4);
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
@@ -1422,7 +1595,7 @@ mod tests {
         board.blacken(0, 0);
         board.blacken(0, 1);
 
-        assert_eq!(board.commit_and_check_solution(), Some(2));
+        assert_eq!(board.check_solution(), SR::NotIdle);
     }
 
     #[test]
@@ -1435,7 +1608,10 @@ mod tests {
 
         // Exec BE, but not allowed to change regular cell
         board.change_letter(0, 2, 'Q');
-        assert_eq!(board.commit_and_check_solution(), Some(2));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(2, ME::BECannotChangeNonBlankCell)
+        );
     }
 
     #[test]
@@ -1455,7 +1631,10 @@ mod tests {
 
         // Exec BE, but not allowed to change letter of a blackened cell
         board.change_letter(0, 0, 'Z');
-        assert_eq!(board.commit_and_check_solution(), Some(5));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(5, ME::AlreadyBlackened)
+        );
     }
 
     #[test]
@@ -1476,7 +1655,10 @@ mod tests {
 
         // Exec TA
         board.blacken(0, 4);
-        assert_eq!(board.commit_and_check_solution(), Some(2));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(2, ME::BECannotBlacken)
+        );
     }
 
     #[test]
@@ -1497,12 +1679,15 @@ mod tests {
 
         // Exec TA
         board.blacken(0, 4);
-        assert_eq!(board.commit_and_check_solution(), Some(2));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(2, ME::CannotMarkWhileExecuting)
+        );
     }
 
     #[test]
     fn be_invalid_underscore() {
-        let mut board = Board::new("BEBEQOK_").unwrap();
+        let mut board = Board::new("BEBE_OK_").unwrap();
 
         // BE
         board.blacken(0, 0);
@@ -1525,7 +1710,10 @@ mod tests {
 
         // Exec LOK
         board.blacken(0, 7);
-        assert_eq!(board.commit_and_check_solution(), Some(2));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(2, ME::BECannotChangeToThisLetter)
+        );
     }
 
     #[test]
@@ -1536,7 +1724,7 @@ mod tests {
         board.blacken(0, 0);
         board.blacken(0, 1);
 
-        // Exec BE, but dash not allowed
+        // Exec BE, but dash not allowed, so this is not even counted as a move.
         board.change_letter(0, 3, GAP_LETTER);
 
         // LOK
@@ -1546,7 +1734,10 @@ mod tests {
 
         // Exec LOK
         board.blacken(0, 6);
-        assert_eq!(board.commit_and_check_solution(), Some(2));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(2, ME::BECannotBlacken)
+        );
     }
 
     #[test]
@@ -1573,7 +1764,7 @@ mod tests {
         board.blacken(1, 0);
         board.blacken(1, 1);
 
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
@@ -1594,7 +1785,7 @@ mod tests {
         // Exec LOK
         board.blacken(0, 2);
 
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
@@ -1612,7 +1803,7 @@ mod tests {
         // Exec LOK
         board.blacken(0, 3);
 
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
@@ -1630,7 +1821,7 @@ mod tests {
         // Exec LOK
         board.blacken(0, 3);
 
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
@@ -1652,7 +1843,7 @@ mod tests {
         // Exec TA
         board.blacken(0, 4);
 
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
@@ -1668,7 +1859,10 @@ mod tests {
         // Exec LOK
         board.blacken(0, 3);
 
-        assert_eq!(board.commit_and_check_solution(), Some(2));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(2, ME::CellCannotChangeLetterInThisState)
+        );
     }
 
     #[test]
@@ -1684,14 +1878,17 @@ mod tests {
         // Exec LOK
         board.blacken(0, 3);
 
-        assert_eq!(board.commit_and_check_solution(), Some(2));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(2, ME::CellCannotChangeLetterInThisState)
+        );
     }
 
     #[test]
     fn cannot_change_gap() {
         let mut board = Board::new("LO-K").unwrap();
 
-        // LOK, but can't randomly change a blank
+        // LOK, but can't randomly change a gap
         board.blacken(0, 0);
         board.blacken(0, 1);
         board.change_letter(0, 2, 'K');
@@ -1700,7 +1897,10 @@ mod tests {
         // Exec LOK
         board.blacken(0, 3);
 
-        assert_eq!(board.commit_and_check_solution(), Some(2));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(2, ME::CellCannotChangeLetterInThisState)
+        );
     }
 
     #[test]
@@ -1724,7 +1924,10 @@ mod tests {
         // Exec TA
         board.blacken(0, 5);
 
-        assert_eq!(board.commit_and_check_solution(), Some(5));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(5, ME::AlreadyBlackened)
+        );
     }
 
     #[test]
@@ -1740,7 +1943,7 @@ mod tests {
         // Exec LOLO
         board.blacken(0, 4);
 
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
@@ -1764,7 +1967,7 @@ mod tests {
         board.blacken(2, 1);
         board.blacken(1, 2);
 
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
@@ -1787,7 +1990,7 @@ mod tests {
         board.blacken(3, 0);
         board.blacken(1, 2);
 
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
@@ -1800,7 +2003,7 @@ mod tests {
         board.blacken(0, 2);
         board.blacken(0, 3);
 
-        assert_eq!(board.commit_and_check_solution(), Some(4));
+        assert_eq!(board.check_solution(), SR::NotIdle);
     }
 
     #[test]
@@ -1821,8 +2024,13 @@ mod tests {
 
         // Exec LOLO, but it only gets one cell because it's going to the upper-right.
         board.blacken(3, 3);
+        board.blacken(2, 2);
+        board.blacken(1, 1);
 
-        assert_eq!(board.commit_and_check_solution(), Some(5));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(5, ME::GatheringNonLetter)
+        );
     }
 
     #[test]
@@ -1838,7 +2046,10 @@ mod tests {
         // Exec LOLO, but it's not allowed to target a space that's already blackened
         board.blacken(0, 0);
 
-        assert_eq!(board.commit_and_check_solution(), Some(4));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(4, ME::AlreadyBlackened)
+        );
     }
 
     #[test]
@@ -1874,11 +2085,34 @@ mod tests {
         board.blacken(0, 3);
         board.blacken(1, 3);
 
-        assert_eq!(board.commit_and_check_solution(), None);
+        assert_eq!(board.check_solution(), SR::Correct);
     }
 
     #[test]
     fn lolo_incomplete_path_1() {
+        let mut board = Board::new(
+            "LOLO\n\
+             --_-\n\
+             -_--\n\
+             _---",
+        )
+        .unwrap();
+
+        // LOLO
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+
+        // Exec LOLO, but try to skip the top one
+        board.blacken(3, 0);
+        board.blacken(2, 1);
+
+        assert_eq!(board.check_solution(), SR::NotIdle);
+    }
+
+    #[test]
+    fn lolo_incomplete_path_2() {
         let mut board = Board::new(
             "LOLO\n\
              LO_K\n\
@@ -1905,11 +2139,14 @@ mod tests {
         // Exec LOK
         board.blacken(3, 0);
 
-        assert_eq!(board.commit_and_check_solution(), Some(6));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(6, ME::LOLONotOnPath)
+        );
     }
 
     #[test]
-    fn lolo_incomplete_path_2() {
+    fn lolo_incomplete_path_3() {
         let mut board = Board::new(
             "LOLO\n\
              LO_K\n\
@@ -1936,11 +2173,14 @@ mod tests {
         // Exec LOK
         board.blacken(2, 1);
 
-        assert_eq!(board.commit_and_check_solution(), Some(6));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(6, ME::LOLONotOnPath)
+        );
     }
 
     #[test]
-    fn lolo_incomplete_path_3() {
+    fn lolo_incomplete_path_4() {
         let mut board = Board::new(
             "LOLO\n\
              LO_K\n\
@@ -1967,7 +2207,10 @@ mod tests {
         // Exec LOK
         board.blacken(1, 2);
 
-        assert_eq!(board.commit_and_check_solution(), Some(6));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(6, ME::LOLONotOnPath)
+        );
     }
 
     #[test]
@@ -1984,11 +2227,15 @@ mod tests {
         board.blacken(0, 2);
         board.blacken(0, 3);
 
-        // Exec LOLO, but both cells are on the same row
+        // Exec LOLO, but both cells are not on the same diagonal. So the first one finishes the LOLO and the second one
+        // attempts to gather a new keyword.
         board.blacken(1, 1);
         board.blacken(1, 2);
 
-        assert_eq!(board.commit_and_check_solution(), Some(5));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(5, ME::GatheringNonLetter)
+        );
     }
 
     #[test]
@@ -2006,11 +2253,15 @@ mod tests {
         board.blacken(0, 2);
         board.blacken(0, 3);
 
-        // Exec LOLO, but both cells are on the same col
+        // Exec LOLO, but both cells are not on the same diagonal. So the first one finishes the LOLO and the second one
+        // attempts to gather a new keyword.
         board.blacken(1, 1);
         board.blacken(2, 1);
 
-        assert_eq!(board.commit_and_check_solution(), Some(5));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(5, ME::GatheringNonLetter)
+        );
     }
 
     #[test]
@@ -2028,11 +2279,15 @@ mod tests {
         board.blacken(0, 2);
         board.blacken(0, 3);
 
-        // Exec LOLO, but both cells are not on the same diagonal
+        // Exec LOLO, but both cells are not on the same diagonal. So the first one finishes the LOLO and the second one
+        // attempts to gather a new keyword.
         board.blacken(2, 1);
         board.blacken(1, 3);
 
-        assert_eq!(board.commit_and_check_solution(), Some(5));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(5, ME::GatheringNonLetter)
+        );
     }
 
     #[test]
@@ -2050,10 +2305,14 @@ mod tests {
         board.blacken(0, 2);
         board.blacken(0, 3);
 
-        // Exec LOLO, but both cells are not on the same diagonal
+        // Exec LOLO, but both cells are not on the same diagonal. So the first one finishes the LOLO and the second one
+        // attempts to gather a new keyword.
         board.blacken(1, 3);
         board.blacken(2, 1);
 
-        assert_eq!(board.commit_and_check_solution(), Some(5));
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(5, ME::GatheringNonLetter)
+        );
     }
 }
