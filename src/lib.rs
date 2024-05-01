@@ -971,6 +971,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn board_gen_wrong_cols() {
+        assert!(Board::new(
+            "12\n\
+             123",
+        )
+        .is_err());
+    }
+
+    #[test]
     fn lok1x4_correct() {
         let mut board = Board::new("LOK_").unwrap();
         board.blacken(0, 0);
@@ -978,6 +987,29 @@ mod tests {
         board.blacken(0, 2);
         board.blacken(0, 3);
         assert_eq!(board.check_solution(), SR::Correct);
+    }
+
+    #[test]
+    fn undo_then_correct() {
+        let mut board = Board::new("LOK_").unwrap();
+        board.blacken(0, 0);
+
+        board.blacken(0, 2);
+        board.blacken(0, 1);
+        board.blacken(0, 3);
+        board.undo();
+        board.undo();
+        board.undo();
+
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+
+        board.blacken(0, 3);
+        board.undo();
+
+        board.blacken(0, 3);
+
+        assert!(board.check());
     }
 
     #[test]
@@ -1167,7 +1199,7 @@ mod tests {
     }
 
     #[test]
-    fn tlak_correct() {
+    fn tlak_correct_left_to_right() {
         let mut board = Board::new("TLAK__").unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
@@ -1176,6 +1208,192 @@ mod tests {
         board.blacken(0, 4);
         board.blacken(0, 5);
         assert_eq!(board.check_solution(), SR::Correct);
+    }
+
+    #[test]
+    fn tlak_correct_left_to_right_big_gap() {
+        let mut board = Board::new("TLAK_-----_").unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        board.blacken(0, 4);
+        board.blacken(0, 10);
+        assert_eq!(board.check_solution(), SR::Correct);
+    }
+
+    #[test]
+    fn tlak_correct_right_to_left() {
+        let mut board = Board::new("TLAK__").unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        board.blacken(0, 5);
+        board.blacken(0, 4);
+        assert_eq!(board.check_solution(), SR::Correct);
+    }
+
+    #[test]
+    fn tlak_correct_right_to_left_big_gap() {
+        let mut board = Board::new("TLAK_-----_").unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        board.blacken(0, 10);
+        board.blacken(0, 4);
+        assert_eq!(board.check_solution(), SR::Correct);
+    }
+
+    #[test]
+    fn tlak_correct_up_to_down() {
+        let mut board = Board::new(
+            "TLAK_\n\
+             ----_",
+        )
+        .unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        board.blacken(0, 4);
+        board.blacken(1, 4);
+        assert_eq!(board.check_solution(), SR::Correct);
+    }
+
+    #[test]
+    fn tlak_correct_up_to_down_big_gap() {
+        let mut board = Board::new(
+            "TLAK_\n\
+             -----\n\
+             -----\n\
+             -----\n\
+             -----\n\
+             -----\n\
+             ----_",
+        )
+        .unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        board.blacken(0, 4);
+        board.blacken(6, 4);
+        assert_eq!(board.check_solution(), SR::Correct);
+    }
+
+    #[test]
+    fn tlak_correct_down_to_up() {
+        let mut board = Board::new(
+            "TLAK_\n\
+             ----_",
+        )
+        .unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        board.blacken(1, 4);
+        board.blacken(0, 4);
+        assert_eq!(board.check_solution(), SR::Correct);
+    }
+
+    #[test]
+    fn tlak_correct_down_to_up_big_gap() {
+        let mut board = Board::new(
+            "TLAK_\n\
+             -----\n\
+             -----\n\
+             -----\n\
+             -----\n\
+             -----\n\
+             ----_",
+        )
+        .unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        board.blacken(6, 4);
+        board.blacken(0, 4);
+        assert_eq!(board.check_solution(), SR::Correct);
+    }
+
+    #[test]
+    fn tlak_not_adjacent_diagonal_bottom_left_to_upper_right() {
+        let mut board = Board::new(
+            "TLAK_\n\
+             ---_-",
+        )
+        .unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        board.blacken(1, 3);
+        board.blacken(0, 4);
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(5, ME::TLAKNotAdjacent)
+        );
+    }
+
+    #[test]
+    fn tlak_not_adjacent_diagonal_upper_right_to_bottom_left() {
+        let mut board = Board::new(
+            "TLAK_\n\
+             ---_-",
+        )
+        .unwrap();
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        board.blacken(0, 4);
+        board.blacken(1, 3);
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(5, ME::TLAKNotAdjacent)
+        );
+    }
+
+    #[test]
+    fn tlak_not_adjacent_diagonal_upper_left_to_bottom_right() {
+        let mut board = Board::new(
+            "_TLAK\n\
+             -_---",
+        )
+        .unwrap();
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        board.blacken(0, 4);
+        board.blacken(0, 0);
+        board.blacken(1, 1);
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(5, ME::TLAKNotAdjacent)
+        );
+    }
+
+    #[test]
+    fn tlak_not_adjacent_diagonal_bottom_right_to_upper_left() {
+        let mut board = Board::new(
+            "_TLAK\n\
+             -_---",
+        )
+        .unwrap();
+        board.blacken(0, 1);
+        board.blacken(0, 2);
+        board.blacken(0, 3);
+        board.blacken(0, 4);
+        board.blacken(1, 1);
+        board.blacken(0, 0);
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(5, ME::TLAKNotAdjacent)
+        );
     }
 
     #[test]
@@ -1275,20 +1493,19 @@ mod tests {
     #[test]
     fn ta_multiple_letters() {
         let mut board = Board::new(
-            "TA\n\
-             QZ",
+            "TA-\n\
+             QQZ",
         )
         .unwrap();
         board.blacken(0, 0);
         board.blacken(0, 1);
 
-        // The first one completes the TA because there's only one cell with this letter. Second one attempts to gather
-        // a new keyword, but doesn't match any.
         board.blacken(1, 0);
+        board.blacken(1, 2);
         board.blacken(1, 1);
         assert_eq!(
             board.check_solution(),
-            SR::ErrorOnMove(3, ME::UnknownKeyword)
+            SR::ErrorOnMove(3, ME::TALetterMismatch)
         );
     }
 
@@ -1436,7 +1653,116 @@ mod tests {
     }
 
     #[test]
-    fn x_incorrect_reversal_down_then_up() {
+    fn x_incorrect_path_reversal_down_then_up() {
+        let mut board = Board::new(
+            "K-X\n\
+             LOX\n\
+             --X",
+        )
+        .unwrap();
+
+        board.blacken(1, 0);
+        board.blacken(1, 1);
+        board.mark_path(1, 2);
+        board.mark_path(2, 2);
+
+        // Reversal not allowed
+        board.mark_path(0, 2);
+
+        board.blacken(0, 0);
+
+        // Exec LOK
+        board.blacken(0, 0);
+
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(4, ME::PathNotConnectedForKeyword)
+        );
+    }
+
+    #[test]
+    fn x_incorrect_path_reversal_up_then_down() {
+        let mut board = Board::new(
+            "_-X\n\
+             LOX\n\
+             K-X",
+        )
+        .unwrap();
+
+        board.blacken(1, 0);
+        board.blacken(1, 1);
+        board.mark_path(1, 2);
+        board.mark_path(0, 2);
+
+        // Reversal not allowed
+        board.mark_path(2, 2);
+        board.blacken(2, 0);
+
+        // Exec LOK
+        board.blacken(0, 0);
+
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(4, ME::PathNotConnectedForKeyword)
+        );
+    }
+
+    #[test]
+    fn x_incorrect_path_reversal_right_then_left() {
+        let mut board = Board::new(
+            "KL_\n\
+             -O-\n\
+             XXX",
+        )
+        .unwrap();
+
+        board.blacken(0, 1);
+        board.blacken(1, 1);
+        board.mark_path(2, 1);
+        board.mark_path(2, 2);
+
+        // Reversal not allowed
+        board.mark_path(2, 0);
+        board.blacken(0, 0);
+
+        // Exec LOK
+        board.blacken(0, 0);
+
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(4, ME::PathNotConnectedForKeyword)
+        );
+    }
+
+    #[test]
+    fn x_incorrect_path_reversal_left_then_right() {
+        let mut board = Board::new(
+            "-LK\n\
+             -O-\n\
+             XXX",
+        )
+        .unwrap();
+
+        board.blacken(0, 1);
+        board.blacken(1, 1);
+        board.mark_path(2, 1);
+        board.mark_path(2, 0);
+
+        // Reversal not allowed
+        board.mark_path(2, 2);
+        board.blacken(0, 2);
+
+        // Exec LOK
+        board.blacken(0, 0);
+
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(4, ME::PathNotConnectedForKeyword)
+        );
+    }
+
+    #[test]
+    fn x_incorrect_blacken_reversal_down_then_up() {
         let mut board = Board::new(
             "_-K\n\
              LOX\n\
@@ -1462,7 +1788,7 @@ mod tests {
     }
 
     #[test]
-    fn x_incorrect_reversal_up_then_down() {
+    fn x_incorrect_blacken_reversal_up_then_down() {
         let mut board = Board::new(
             "_-X\n\
              LOX\n\
@@ -1488,7 +1814,7 @@ mod tests {
     }
 
     #[test]
-    fn x_incorrect_reversal_right_then_left() {
+    fn x_incorrect_blacken_reversal_right_then_left() {
         let mut board = Board::new(
             "-L_\n\
              -O-\n\
@@ -1514,7 +1840,7 @@ mod tests {
     }
 
     #[test]
-    fn x_incorrect_reversal_left_then_right() {
+    fn x_incorrect_blacken_reversal_left_then_right() {
         let mut board = Board::new(
             "-L_\n\
              -O-\n\
@@ -1786,6 +2112,27 @@ mod tests {
         board.blacken(0, 2);
 
         assert_eq!(board.check_solution(), SR::Correct);
+    }
+
+    #[test]
+    fn wildcard_cannot_change_to_gap() {
+        let mut board = Board::new("LO?K_").unwrap();
+
+        // LOK
+        board.blacken(0, 0);
+        board.blacken(0, 1);
+
+        // Not allowed to change to gap, so this move is just ignored.
+        board.change_letter(0, 2, GAP_LETTER);
+        board.blacken(0, 3);
+
+        // Exec LOK
+        board.blacken(0, 4);
+
+        assert_eq!(
+            board.check_solution(),
+            SR::ErrorOnMove(2, ME::BlackenNotConnectedForKeyword)
+        );
     }
 
     #[test]
