@@ -1347,7 +1347,7 @@ mod tests {
     }
 
     #[test]
-    fn x_incorrect_reversal() {
+    fn x_incorrect_reversal_down_then_up() {
         let mut board = Board::new(
             "_-K\n\
              LOX\n\
@@ -1362,6 +1362,75 @@ mod tests {
 
         // Reversal not allowed
         board.blacken(0, 2);
+
+        // Exec LOK
+        board.blacken(0, 0);
+
+        assert_eq!(board.commit_and_check_solution(), Some(4));
+    }
+
+    #[test]
+    fn x_incorrect_reversal_up_then_down() {
+        let mut board = Board::new(
+            "_-X\n\
+             LOX\n\
+             --K",
+        )
+        .unwrap();
+
+        board.blacken(1, 0);
+        board.blacken(1, 1);
+        board.mark_path(1, 2);
+        board.mark_path(0, 2);
+
+        // Reversal not allowed
+        board.blacken(2, 2);
+
+        // Exec LOK
+        board.blacken(0, 0);
+
+        assert_eq!(board.commit_and_check_solution(), Some(4));
+    }
+
+    #[test]
+    fn x_incorrect_reversal_right_then_left() {
+        let mut board = Board::new(
+            "-L_\n\
+             -O-\n\
+             KXX",
+        )
+        .unwrap();
+
+        board.blacken(0, 1);
+        board.blacken(1, 1);
+        board.mark_path(2, 1);
+        board.mark_path(2, 2);
+
+        // Reversal not allowed
+        board.blacken(2, 0);
+
+        // Exec LOK
+        board.blacken(0, 0);
+
+        assert_eq!(board.commit_and_check_solution(), Some(4));
+    }
+
+    #[test]
+    fn x_incorrect_reversal_left_then_right() {
+        let mut board = Board::new(
+            "-L_\n\
+             -O-\n\
+             XXK",
+        )
+        .unwrap();
+
+        board.blacken(0, 1);
+        board.blacken(1, 1);
+        board.mark_path(2, 1);
+        board.mark_path(2, 0);
+
+        // Reversal not allowed
+        board.blacken(2, 2);
 
         // Exec LOK
         board.blacken(0, 0);
