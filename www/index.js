@@ -155,9 +155,8 @@ function onLetterInput(evt) {
 }
 
 function onClickCheckSolution(evt) {
-    const result = g_board.commit_and_check_solution();
     const resultDisplay = document.getElementById("result_display");
-    if (result == null) {
+    if (g_board.check()) {
         resultDisplay.className = "result_success";
         resultDisplay.textContent = "YAY";
     } else {
