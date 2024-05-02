@@ -1,4 +1,5 @@
 setlocal
+set RUSTFLAGS=%RUSTFLAGS% -C instrument-coverage
 del default_*.prof*
 cargo test
 cargo profdata -- merge -sparse default_*.profraw -o default.profdata
